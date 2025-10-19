@@ -1,0 +1,38 @@
+# Node / pnpm
+node_modules/
+.pnpm-store/
+pnpm-lock.yaml
+
+# Builds
+dist/
+.next/
+out/
+coverage/
+*.log
+*.tsbuildinfo
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS / Editor
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# Docker
+docker-data/
+docker-compose.override.yml
+
+# App uploads (nếu là dữ liệu tạm)
+uploads/
+apps/**/uploads/
+
+# Cache
+.cache/
+.tmp/
+
+# Meili / Postgres local mounts (nếu có)
+infra/**/data/

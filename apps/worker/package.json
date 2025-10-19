@@ -1,0 +1,20 @@
+{
+"name": "@novels/worker",
+"version": "0.0.1",
+"private": true,
+"type": "module",
+"scripts": {
+"dev": "tsx src/index.ts",
+"build": "tsc -p tsconfig.json",
+"start": "node dist/index.js",
+"typecheck": "tsc -p tsconfig.json --noEmit"
+},
+"dependencies": {
+"bullmq": "^5.25.4"
+},
+"devDependencies": {
+"tsx": "^4.16.2",
+"typescript": "^5.6.3",
+"@types/node": "^20.12.14"
+}
+}

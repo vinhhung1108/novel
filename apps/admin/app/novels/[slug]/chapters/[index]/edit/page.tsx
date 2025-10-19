@@ -1,24 +1,21 @@
 "use client";
-
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
+import { API, apiFetch } from "../../../../lib/auth";
 
-const API = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:4000";
-
-type Novel = { id: string; title: string; slug: string };
-type Chapter = {
-  id: string;
-  novel_id: string;
-  index_no: number;
-  title: string;
-  words_count: number;
-  slug: string | null;
-  published_at: string | null;
-  updated_at: string;
+type ChapterFull = {
+  chapter: {
+    id: string;
+    novel_id: string;
+    index_no: number;
+    title: string;
+    slug?: string | null;
+    updated_at: string;
+    words_count: number;
+  };
+  body?: { content_html: string } | null;
 };
-type ChapterBody = { chapter_id: string; content_html: string };
 
 export default function EditChapterPage() {
   const params = useParams<{ slug: string; index: string }>();
@@ -26,182 +23,91 @@ export default function EditChapterPage() {
   const index = Number(params.index);
 
   const router = useRouter();
-  const { token, getAuthHeader } = useAuth();
+  const { token } = useAuth();
 
-  const [novel, setNovel] = useState<Novel | null>(null);
-  const [chapter, setChapter] = useState<Chapter | null>(null);
-  const [content, setContent] = useState("");
-  const [title, setTitle] = useState("");
-  const [indexNew, setIndexNew] = useState<number | "">("");
+  const [novelId, setNovelId] = useState<string>("");
+  const [title, setTitle] = useState<string>("");
+  const [content, setContent] = useState<string>("");
   const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
 
-  // guard
-  useEffect(() => {
-    if (token === null) router.replace("/login");
-  }, [token, router]);
-
-  // load novel + chapter
   useEffect(() => {
     (async () => {
-      if (!slug || !Number.isFinite(index)) return;
-      setLoading(true);
-      setErr("");
-      try {
-        const nres = await fetch(
-          `${API}/v1/novels/${encodeURIComponent(slug)}`,
-          {
-            cache: "no-store",
-          }
-        );
-        if (!nres.ok) throw new Error(`Không lấy được truyện (${nres.status})`);
-        const n: Novel = await nres.json();
-        setNovel(n);
-
-        const cres = await fetch(
-          `${API}/v1/novels/${encodeURIComponent(n.id)}/chapters/${index}`,
-          { cache: "no-store" }
-        );
-        if (!cres.ok) throw new Error(`Không lấy được chương (${cres.status})`);
-        const {
-          chapter: ch,
-          body,
-        }: { chapter: Chapter; body: ChapterBody | null } = await cres.json();
-        setChapter(ch);
-        setTitle(ch.title);
-        setIndexNew(ch.index_no);
-        setContent(body?.content_html ?? "");
-      } catch (e: any) {
-        setErr(e?.message ?? "Lỗi tải dữ liệu");
-      } finally {
-        setLoading(false);
-      }
+      // resolve novel id by slug
+      const nres = await fetch(`${API}/v1/novels/${encodeURIComponent(slug)}`, {
+        cache: "no-store",
+      });
+      if (!nres.ok) return setMsg("Không tải được truyện");
+      const n = await nres.json();
+      setNovelId(n.id);
+      // load chapter
+      const cres = await fetch(
+        `${API}/v1/novels/${encodeURIComponent(n.id)}/chapters/${index}`,
+        { cache: "no-store" }
+      );
+      if (!cres.ok) return setMsg("Không tải được chương");
+      const ch = (await cres.json()) as ChapterFull;
+      setTitle(ch.chapter.title);
+      setContent(ch.body?.content_html ?? "");
     })();
   }, [slug, index]);
 
-  const canSave = useMemo(() => {
-    if (!title || !String(title).trim()) return false;
-    if (saving) return false;
-    return true;
-  }, [title, saving]);
-
   const save = async () => {
-    if (!novel || !chapter) return;
-    if (!canSave) return;
-
-    setSaving(true);
-    try {
-      const res = await fetch(
-        `${API}/v1/novels/${encodeURIComponent(novel.id)}/chapters/${chapter.index_no}`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            ...getAuthHeader(),
-          },
-          body: JSON.stringify({
-            title: title.trim(),
-            content,
-            // nếu người dùng đổi số chương, gửi lên; nếu để nguyên, bỏ qua
-            ...(indexNew && indexNew !== chapter.index_no
-              ? { index_no: indexNew }
-              : {}),
-          }),
-        }
-      );
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(`Lưu chương thất bại: ${res.status} ${t}`);
-      }
-      // ✅ quay lại danh sách chương
-      router.push(`/novels/${encodeURIComponent(slug)}/chapters`);
-      router.refresh();
-    } catch (e: any) {
-      alert(e?.message ?? "Lỗi lưu chương");
-    } finally {
-      setSaving(false);
+    if (!novelId) return;
+    if (!title.trim()) {
+      setMsg("Tiêu đề không được rỗng");
+      return;
     }
+    setSaving(true);
+    const res = await apiFetch(
+      `/v1/novels/${novelId}/chapters/${index}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ title: title.trim(), content }),
+      },
+      token || undefined
+    );
+    setSaving(false);
+    if (!res.ok) {
+      setMsg(`Lưu thất bại: ${await res.text()}`);
+      return;
+    }
+    router.push(`/novels/${encodeURIComponent(slug)}/chapters`);
   };
 
   return (
-    <main style={{ padding: 16, display: "grid", gap: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <Link href={`/novels/${encodeURIComponent(slug)}/chapters`}>
-          ← Danh sách chương
-        </Link>
-        <h1 style={{ margin: 0 }}>
-          {novel ? `Sửa chương — ${novel.title}` : "Sửa chương"}
-        </h1>
-      </div>
-
-      {loading ? (
-        <div>Đang tải…</div>
-      ) : err ? (
-        <div style={{ color: "crimson" }}>{err}</div>
-      ) : !chapter ? (
-        <div>Không tìm thấy chương.</div>
-      ) : (
-        <section
-          style={{
-            display: "grid",
-            gap: 12,
-            border: "1px solid #eee",
-            borderRadius: 12,
-            padding: 16,
-          }}
+    <main style={{ padding: 16, display: "grid", gap: 10 }}>
+      <h1>Sửa chương #{index}</h1>
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder="Tiêu đề"
+      />
+      <textarea
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        rows={18}
+        style={{ fontFamily: "monospace", padding: 10 }}
+      />
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={() => router.back()}>↩ Quay lại</button>
+        <button
+          onClick={save}
+          disabled={!title.trim() || saving}
+          style={{ padding: "8px 12px", borderRadius: 8 }}
         >
-          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-            <label style={{ width: 120 }}>Số chương</label>
-            <input
-              type="number"
-              min={1}
-              value={indexNew}
-              onChange={(e) => {
-                const v = e.target.value;
-                setIndexNew(v === "" ? "" : Number(v));
-              }}
-              style={{ width: 140 }}
-            />
-          </div>
-
-          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-            <label style={{ width: 120 }}>Tiêu đề</label>
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Tiêu đề chương"
-              style={{ flex: 1 }}
-            />
-          </div>
-
-          <div style={{ display: "grid", gap: 8 }}>
-            <label>Nội dung (HTML)</label>
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              rows={18}
-              style={{ fontFamily: "monospace", padding: 10, borderRadius: 8 }}
-            />
-          </div>
-
-          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-            <Link
-              href={`/novels/${encodeURIComponent(slug)}/chapters`}
-              style={{ padding: "8px 14px" }}
-            >
-              Hủy
-            </Link>
-            <button
-              onClick={save}
-              disabled={!canSave}
-              style={{ padding: "8px 14px", borderRadius: 8 }}
-            >
-              {saving ? "Đang lưu…" : "💾 Lưu & quay lại"}
-            </button>
-          </div>
-        </section>
-      )}
+          {saving ? "Đang lưu…" : "💾 Lưu & quay lại"}
+        </button>
+        {msg && (
+          <span
+            style={{
+              color: msg.startsWith("Lưu thất bại") ? "crimson" : "green",
+            }}
+          >
+            {msg}
+          </span>
+        )}
+      </div>
     </main>
   );
 }

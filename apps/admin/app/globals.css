@@ -1,0 +1,12 @@
+/* apps/admin/app/globals.css */
+@import "tailwindcss";
+
+/* tuỳ chọn */
+:root {
+  color-scheme: light;
+}
+html,
+body {
+  height: 100%;
+  background: #f7f7f8;
+}

@@ -1,50 +1,34 @@
 "use client";
-
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import Time from "@/components/Time";
+import { API, apiFetch } from "../../lib/auth";
 
-const API = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:4000";
 const CDN =
   process.env.NEXT_PUBLIC_S3_PUBLIC_BASE ?? "http://localhost:9000/novels";
-
 type Novel = {
   id: string;
   title: string;
   slug: string;
-  description?: string | null;
   cover_image_key?: string | null;
   updated_at: string;
 };
 
 type ListResp =
   | Novel[]
-  | {
-      items: Novel[];
-      total: number;
-      page: number;
-      limit: number;
-    };
-
-const DEFAULT_LIMIT = 12;
-
-function toArray(resp: ListResp): Novel[] {
-  if (Array.isArray(resp)) return resp;
-  return resp?.items ?? [];
-}
+  | { items: Novel[]; total: number; page: number; limit: number };
+const toArray = (r: ListResp) => (Array.isArray(r) ? r : r.items || []);
 
 export default function NovelsListPage() {
-  const { token, getAuthHeader } = useAuth();
+  const { token } = useAuth();
   const router = useRouter();
   const sp = useSearchParams();
 
-  const [q, setQ] = useState<string>(sp.get("q") || "");
-  const [page, setPage] = useState<number>(Number(sp.get("page") || 1));
-  const [limit, setLimit] = useState<number>(
-    Number(sp.get("limit") || DEFAULT_LIMIT)
-  );
+  const [q, setQ] = useState(sp.get("q") || "");
+  const [page, setPage] = useState(Number(sp.get("page") || 1));
+  const [limit, setLimit] = useState(Number(sp.get("limit") || 12));
   const [sort, setSort] = useState<"updated_at" | "title">(
     (sp.get("sort") as any) || "updated_at"
   );
@@ -57,20 +41,19 @@ export default function NovelsListPage() {
   const [items, setItems] = useState<Novel[]>([]);
   const [total, setTotal] = useState(0);
 
-  // Chưa có token -> quay lại login
   useEffect(() => {
     if (token === null) router.replace("/login");
   }, [token, router]);
 
-  // Sync URL
+  // sync URL
   useEffect(() => {
-    const params = new URLSearchParams();
-    if (q.trim()) params.set("q", q.trim());
-    params.set("page", String(page));
-    params.set("limit", String(limit));
-    params.set("sort", sort);
-    params.set("order", order);
-    router.replace(`/novels/list?${params.toString()}`);
+    const p = new URLSearchParams();
+    if (q.trim()) p.set("q", q.trim());
+    p.set("page", String(page));
+    p.set("limit", String(limit));
+    p.set("sort", sort);
+    p.set("order", order);
+    router.replace(`/novels/list?${p.toString()}`);
   }, [q, page, limit, sort, order, router]);
 
   // debounce q
@@ -81,83 +64,59 @@ export default function NovelsListPage() {
   }, [q]);
 
   // fetch list
-  async function fetchList() {
-    try {
-      setLoading(true);
-      setErr("");
-      const url = new URL(`${API}/v1/novels`);
-      url.searchParams.set("page", String(page));
-      url.searchParams.set("limit", String(limit));
-      url.searchParams.set("sort", sort);
-      url.searchParams.set("order", order);
-      if (debouncedQ.trim()) url.searchParams.set("q", debouncedQ.trim());
-
-      const res = await fetch(url.toString(), { cache: "no-store" });
-      if (!res.ok) {
-        setErr(`Không tải được danh sách truyện (${res.status})`);
-        setItems([]);
-        setTotal(0);
-      } else {
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoading(true);
+        setErr("");
+        const url = new URL(`${API}/v1/novels`);
+        url.searchParams.set("page", String(page));
+        url.searchParams.set("limit", String(limit));
+        url.searchParams.set("sort", sort);
+        url.searchParams.set("order", order);
+        if (debouncedQ.trim()) url.searchParams.set("q", debouncedQ.trim());
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as ListResp;
         const arr = toArray(data);
         setItems(arr);
-        setTotal(Array.isArray(data) ? arr.length : (data.total ?? arr.length));
+        setTotal(Array.isArray(data) ? arr.length : data.total || 0);
+      } catch (e: any) {
+        setErr(e?.message ?? "Lỗi");
+        setItems([]);
+        setTotal(0);
+      } finally {
+        setLoading(false);
       }
-    } catch (e: any) {
-      setErr(e?.message ?? "Lỗi kết nối");
-      setItems([]);
-      setTotal(0);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    fetchList();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    })();
   }, [page, limit, sort, order, debouncedQ]);
 
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil((total || 0) / (limit || DEFAULT_LIMIT))),
+    () => Math.max(1, Math.ceil((total || 0) / (limit || 12))),
     [total, limit]
   );
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
     if (page < 1) setPage(1);
   }, [page, totalPages]);
-
-  const gotoFirst = () => setPage(1);
-  const prev = () => setPage((p) => Math.max(1, p - 1));
-  const next = () => setPage((p) => Math.min(totalPages, p + 1));
-  const gotoLast = () => setPage(totalPages);
-
   useEffect(() => {
     setPage(1);
   }, [debouncedQ, limit, sort, order]);
 
-  // Xoá 1 truyện
-  const deleteOne = async (id: string, title: string) => {
-    if (!confirm(`Xoá truyện “${title}”? Thao tác này không thể hoàn tác.`)) {
+  const remove = async (id: string) => {
+    if (!confirm("Xoá truyện này? Hành động không thể hoàn tác.")) return;
+    const res = await apiFetch(
+      `/v1/novels/${id}`,
+      { method: "DELETE" },
+      token || undefined
+    );
+    if (!res.ok) {
+      alert(`Xoá thất bại: ${await res.text()}`);
       return;
     }
-    try {
-      const res = await fetch(`${API}/v1/novels/${id}`, {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-          ...getAuthHeader(),
-        },
-      });
-      if (!res.ok) {
-        const t = await res.text();
-        alert(`Xoá thất bại: ${res.status} ${t}`);
-        return;
-      }
-      // refetch danh sách
-      await fetchList();
-    } catch (e: any) {
-      alert(e?.message ?? "Lỗi xoá truyện");
-    }
+    // refresh
+    const url = new URL(window.location.href);
+    router.replace(url.pathname + url.search);
   };
 
   return (
@@ -212,18 +171,8 @@ export default function NovelsListPage() {
             ))}
           </select>
         </div>
-        <Link
-          href="/novels"
-          style={{
-            padding: "8px 12px",
-            border: "1px solid #ddd",
-            borderRadius: 8,
-            textDecoration: "none",
-            color: "#111",
-            justifySelf: "end",
-          }}
-        >
-          ➕ Thêm truyện
+        <Link href="/novels" style={btn}>
+          ➕ Tạo truyện
         </Link>
       </section>
 
@@ -302,27 +251,26 @@ export default function NovelsListPage() {
                     >
                       📚 Chương
                     </Link>
+                    <button
+                      onClick={() => remove(n.id)}
+                      style={{
+                        fontSize: 13,
+                        color: "crimson",
+                        background: "transparent",
+                        border: 0,
+                        cursor: "pointer",
+                      }}
+                    >
+                      🗑️ Xoá
+                    </button>
                     <a
-                      href={`http://localhost:3000/truyen/${encodeURIComponent(
-                        n.slug
-                      )}`}
+                      href={`http://localhost:3000/truyen/${encodeURIComponent(n.slug)}`}
                       target="_blank"
                       rel="noreferrer"
                       style={{ fontSize: 13 }}
                     >
                       👁️ Xem web
                     </a>
-                    <button
-                      onClick={() => deleteOne(n.id, n.title)}
-                      style={{
-                        fontSize: 13,
-                        marginLeft: "auto",
-                        color: "#b00020",
-                      }}
-                      title="Xoá truyện"
-                    >
-                      🗑️ Xoá
-                    </button>
                   </div>
                 </div>
               </div>
@@ -339,24 +287,32 @@ export default function NovelsListPage() {
           alignItems: "center",
         }}
       >
-        <button onClick={gotoFirst} disabled={page <= 1} style={{ padding: 8 }}>
+        <button
+          onClick={() => setPage(1)}
+          disabled={page <= 1}
+          style={{ padding: 8 }}
+        >
           « Đầu
         </button>
-        <button onClick={prev} disabled={page <= 1} style={{ padding: 8 }}>
+        <button
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
+          disabled={page <= 1}
+          style={{ padding: 8 }}
+        >
           ← Trước
         </button>
         <span>
           Trang {page} / {totalPages}
         </span>
         <button
-          onClick={next}
+          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
           disabled={page >= totalPages}
           style={{ padding: 8 }}
         >
           Sau →
         </button>
         <button
-          onClick={gotoLast}
+          onClick={() => setPage(totalPages)}
           disabled={page >= totalPages}
           style={{ padding: 8 }}
         >
@@ -366,3 +322,11 @@ export default function NovelsListPage() {
     </main>
   );
 }
+const btn: React.CSSProperties = {
+  padding: "8px 12px",
+  border: "1px solid #ddd",
+  borderRadius: 8,
+  textDecoration: "none",
+  color: "#111",
+  justifySelf: "end",
+};

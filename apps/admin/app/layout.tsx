@@ -1,5 +1,6 @@
+import "./globals.css";
+import { AuthProvider } from "@/components/AuthProvider";
 import AdminHeader from "@/components/AdminHeader";
-import AuthProvider from "@/components/AuthProvider";
 
 export default function RootLayout({
   children,
@@ -8,18 +9,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="vi">
-      <body
-        style={{
-          fontFamily: "system-ui, -apple-system, Segoe UI, Roboto",
-          margin: 0,
-          background: "#fafafa",
-        }}
-      >
+      <body className="bg-zinc-50 text-zinc-900">
         <AuthProvider>
           <AdminHeader />
-          <div style={{ maxWidth: 1200, margin: "0 auto", padding: 16 }}>
-            {children}
-          </div>
+          <div className="mx-auto max-w-6xl px-4 py-6">{children}</div>
         </AuthProvider>
       </body>
     </html>

@@ -3,41 +3,39 @@ export async function fileToImage(file: File): Promise<HTMLImageElement> {
   try {
     const img = new Image();
     img.src = url;
-    await new Promise((res, rej) => {
-      img.onload = () => res(null);
-      img.onerror = rej;
-    });
+    await img.decode();
     return img;
   } finally {
-    // không revoke ngay, vì Cropper còn dùng .src; sẽ được GC sau
+    // không revoke ngay; để component dùng xong hãy revoke nếu cần
   }
 }
 
 export async function cropToWebp(
-  image: HTMLImageElement,
+  img: HTMLImageElement,
   area: { x: number; y: number; width: number; height: number },
-  outW: number,
-  outH: number,
+  targetW: number,
+  targetH: number,
   quality = 0.86
 ): Promise<{ blob: Blob; dataUrl: string }> {
   const canvas = document.createElement("canvas");
-  canvas.width = outW;
-  canvas.height = outH;
+  canvas.width = targetW;
+  canvas.height = targetH;
   const ctx = canvas.getContext("2d")!;
+  // vẽ phần crop vào canvas đích (scale về targetW x targetH)
   ctx.drawImage(
-    image,
+    img,
     area.x,
     area.y,
     area.width,
     area.height,
     0,
     0,
-    outW,
-    outH
+    targetW,
+    targetH
   );
-  const blob: Blob = await new Promise((res) =>
-    canvas.toBlob((b) => res(b!), "image/webp", quality)
+  const blob = await new Promise<Blob>((resolve) =>
+    canvas.toBlob((b) => resolve(b as Blob), "image/webp", quality)
   );
-  const dataUrl = URL.createObjectURL(blob);
+  const dataUrl = canvas.toDataURL("image/webp", quality);
   return { blob, dataUrl };
 }

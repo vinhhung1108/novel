@@ -1,19 +1,12 @@
 "use client";
-
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import Time from "@/components/Time";
+import { API, apiFetch } from "../../../lib/auth";
 
-const API = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:4000";
-
-type Novel = {
-  id: string;
-  title: string;
-  slug: string;
-};
-
+type Novel = { id: string; title: string; slug: string };
 type Chapter = {
   id: string;
   novel_id: string;
@@ -33,33 +26,28 @@ export default function NovelChaptersPage() {
   const [items, setItems] = useState<Chapter[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-
-  // chọn/xoá nhiều
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-
-  // modal tạo chương
-  const [showCreate, setShowCreate] = useState(false);
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
-  const [nextIndexLoading, setNextIndexLoading] = useState(false);
-  const [nextIndex, setNextIndex] = useState<number | null>(null);
-  const [creating, setCreating] = useState(false);
-
-  // phân trang đơn giản
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(30);
 
-  // bảo vệ: chưa có token thì chuyển login
+  // tạo nhanh
+  const [showCreate, setShowCreate] = useState(false);
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [nextIndex, setNextIndex] = useState<number | null>(null);
+  const [nextIndexLoading, setNextIndexLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
+
+  // chọn xoá nhiều
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
+
   useEffect(() => {
     if (token === null) router.replace("/login");
   }, [token, router]);
 
-  // load novel + chapters
-  async function fetchNovelAndChapters(sl: string, p: number, l: number) {
+  async function load(sl: string, p: number, l: number) {
     setLoading(true);
     setErr("");
     try {
-      // novel
       const nres = await fetch(`${API}/v1/novels/${encodeURIComponent(sl)}`, {
         cache: "no-store",
       });
@@ -67,7 +55,6 @@ export default function NovelChaptersPage() {
       const n = (await nres.json()) as Novel;
       setNovel(n);
 
-      // chapters
       const cres = await fetch(
         `${API}/v1/novels/${encodeURIComponent(n.id)}/chapters?page=${p}&limit=${l}`,
         { cache: "no-store" }
@@ -76,11 +63,10 @@ export default function NovelChaptersPage() {
         throw new Error(`Không lấy được danh sách chương (${cres.status})`);
       const list = (await cres.json()) as Chapter[];
       setItems(Array.isArray(list) ? list : []);
-      setSelected(new Set()); // reset lựa chọn khi đổi trang/danh sách
+      setChecked({});
     } catch (e: any) {
       setErr(e?.message ?? "Lỗi kết nối");
       setItems([]);
-      setSelected(new Set());
     } finally {
       setLoading(false);
     }
@@ -88,21 +74,19 @@ export default function NovelChaptersPage() {
 
   useEffect(() => {
     if (!slug) return;
-    fetchNovelAndChapters(slug, page, limit);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    load(slug, page, limit);
   }, [slug, page, limit]);
 
-  // lấy next-index khi mở modal tạo chương (chỉ 1 lần mỗi lần mở)
   async function fetchNextIndex(novel_id: string) {
     try {
       setNextIndexLoading(true);
       setNextIndex(null);
       const res = await fetch(
-        `${API}/v1/novels/${encodeURIComponent(novel_id)}/chapters/next-index`,
+        `${API}/v1/novels/${novel_id}/chapters/next-index`,
         { cache: "no-store" }
       );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json(); // { next_index: number }
+      if (!res.ok) throw new Error();
+      const data = await res.json();
       setNextIndex(Number(data?.next_index ?? 1));
     } catch {
       setNextIndex(null);
@@ -119,34 +103,25 @@ export default function NovelChaptersPage() {
     await fetchNextIndex(novel.id);
   };
 
-  // tạo chương — dùng API auto-index (KHÔNG gửi index_no)
   const createChapter = async () => {
-    if (!novel) return;
-    if (!title.trim()) return;
-
+    if (!novel || !title.trim()) return;
     setCreating(true);
     try {
       const res = await fetch(
         `${API}/v1/novels/${encodeURIComponent(novel.id)}/chapters`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...getAuthHeader(),
-          },
+          headers: { "Content-Type": "application/json", ...getAuthHeader() },
           body: JSON.stringify({ title: title.trim(), content }),
         }
       );
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(`Tạo chương thất bại: ${res.status} ${t}`);
-      }
-      // reload list về trang 1 để dễ thấy chương mới
+      if (!res.ok)
+        throw new Error(
+          `Tạo chương thất bại: ${res.status} ${await res.text()}`
+        );
       setShowCreate(false);
-      setTitle("");
-      setContent("");
       setPage(1);
-      await fetchNovelAndChapters(slug, 1, limit);
+      await load(slug, 1, limit);
     } catch (e: any) {
       alert(e?.message ?? "Lỗi tạo chương");
     } finally {
@@ -154,96 +129,39 @@ export default function NovelChaptersPage() {
     }
   };
 
-  // chọn 1 dòng
-  const toggleRow = (idx: number) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx);
-      else next.add(idx);
-      return next;
-    });
-  };
-
-  // chọn tất cả ở trang hiện tại
-  const toggleAll = () => {
-    if (items.length === 0) return;
-    const allIndices = new Set(items.map((c) => c.index_no));
-    const allSelected = [...allIndices].every((i) => selected.has(i));
-    if (allSelected) {
-      // bỏ chọn tất cả
-      setSelected((_) => {
-        const next = new Set(selected);
-        for (const i of allIndices) next.delete(i);
-        return next;
-      });
-    } else {
-      // chọn tất cả
-      setSelected((_) => new Set([...selected, ...allIndices]));
-    }
-  };
-
-  // xoá 1 chương
-  const deleteOne = async (index_no: number) => {
+  const removeOne = async (index_no: number) => {
     if (!novel) return;
     if (!confirm(`Xoá chương #${index_no}?`)) return;
-    const res = await fetch(
-      `${API}/v1/novels/${encodeURIComponent(novel.id)}/chapters/${index_no}`,
-      {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-          ...getAuthHeader(),
-        },
-      }
+    const res = await apiFetch(
+      `/v1/novels/${novel.id}/chapters/${index_no}`,
+      { method: "DELETE" },
+      token || undefined
     );
     if (!res.ok) {
-      const t = await res.text();
-      alert(`Xoá thất bại: ${res.status} ${t}`);
+      alert(`Xoá thất bại: ${await res.text()}`);
       return;
     }
-    await fetchNovelAndChapters(slug, page, limit);
+    await load(slug, page, limit);
   };
 
-  // xoá nhiều chương
-  const deleteSelected = async () => {
+  const removeMany = async () => {
     if (!novel) return;
-    const indices = [...selected].sort((a, b) => a - b);
-    if (indices.length === 0) {
-      alert("Vui lòng chọn ít nhất 1 chương.");
-      return;
-    }
-    if (!confirm(`Xoá ${indices.length} chương đã chọn?`)) return;
-
-    const res = await fetch(
-      `${API}/v1/novels/${encodeURIComponent(novel.id)}/chapters`,
-      {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-          ...getAuthHeader(),
-        },
-        body: JSON.stringify({ indices }),
-      }
+    const pick = items.filter((i) => checked[i.id]).map((i) => i.index_no);
+    if (pick.length === 0) return alert("Chưa chọn chương");
+    if (!confirm(`Xoá ${pick.length} chương đã chọn?`)) return;
+    const res = await apiFetch(
+      `/v1/novels/${novel.id}/chapters/bulk-delete`,
+      { method: "POST", body: JSON.stringify({ indexes: pick }) },
+      token || undefined
     );
     if (!res.ok) {
-      const t = await res.text();
-      alert(`Xoá nhiều thất bại: ${res.status} ${t}`);
+      alert(`Xoá thất bại: ${await res.text()}`);
       return;
     }
-    setSelected(new Set());
-    // refetch trang hiện tại; nếu trang trống, lùi về trang 1
-    await fetchNovelAndChapters(slug, page, limit);
-    if (items.length === indices.length && page > 1) {
-      setPage(1);
-    }
+    await load(slug, page, limit);
   };
 
   const total = useMemo(() => items.length, [items]);
-  const allChecked =
-    items.length > 0 &&
-    items.every((c) => selected.has(c.index_no)) &&
-    selected.size >= items.length;
-  const someChecked = items.some((c) => selected.has(c.index_no));
 
   return (
     <main style={{ display: "grid", gap: 16, padding: 16 }}>
@@ -260,10 +178,8 @@ export default function NovelChaptersPage() {
             ➕ Chương mới
           </button>
           <button
-            onClick={deleteSelected}
-            disabled={!someChecked}
-            style={{ padding: "8px 12px", borderRadius: 8 }}
-            title={someChecked ? "Xoá các chương đã chọn" : "Chưa chọn chương"}
+            onClick={removeMany}
+            style={{ padding: "8px 12px", borderRadius: 8, color: "crimson" }}
           >
             🗑️ Xoá đã chọn
           </button>
@@ -280,18 +196,11 @@ export default function NovelChaptersPage() {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ textAlign: "left", borderBottom: "1px solid #eee" }}>
-              <th style={{ padding: 8, width: 36 }}>
-                <input
-                  type="checkbox"
-                  aria-label="Chọn tất cả"
-                  checked={allChecked}
-                  onChange={toggleAll}
-                />
-              </th>
+              <th style={{ padding: 8, width: 36 }}></th>
               <th style={{ padding: 8, width: 80 }}>#</th>
               <th style={{ padding: 8 }}>Tiêu đề</th>
               <th style={{ padding: 8, width: 160 }}>Cập nhật</th>
-              <th style={{ padding: 8, width: 200 }}></th>
+              <th style={{ padding: 8, width: 220 }}></th>
             </tr>
           </thead>
           <tbody>
@@ -300,9 +209,10 @@ export default function NovelChaptersPage() {
                 <td style={{ padding: 8 }}>
                   <input
                     type="checkbox"
-                    checked={selected.has(c.index_no)}
-                    onChange={() => toggleRow(c.index_no)}
-                    aria-label={`Chọn chương #${c.index_no}`}
+                    checked={!!checked[c.id]}
+                    onChange={(e) =>
+                      setChecked((s) => ({ ...s, [c.id]: e.target.checked }))
+                    }
                   />
                 </td>
                 <td style={{ padding: 8 }}>{c.index_no}</td>
@@ -312,30 +222,25 @@ export default function NovelChaptersPage() {
                 </td>
                 <td style={{ padding: 8, display: "flex", gap: 10 }}>
                   <Link
-                    href={`/novels/${encodeURIComponent(
-                      slug
-                    )}/chapters/${c.index_no}/edit`}
+                    href={`/novels/${encodeURIComponent(slug)}/chapters/${c.index_no}/edit`}
                   >
                     ✏️ Sửa
                   </Link>
                   <a
-                    href={`http://localhost:3000/truyen/${encodeURIComponent(
-                      slug
-                    )}/chuong/${c.index_no}`}
+                    href={`http://localhost:3000/truyen/${encodeURIComponent(slug)}/chuong/${c.index_no}`}
                     target="_blank"
                     rel="noreferrer"
                   >
                     👁️ Xem
                   </a>
                   <button
-                    onClick={() => deleteOne(c.index_no)}
+                    onClick={() => removeOne(c.index_no)}
                     style={{
-                      padding: "4px 10px",
-                      borderRadius: 6,
-                      background: "#ffe9ea",
-                      border: "1px solid #ffd1d4",
+                      color: "crimson",
+                      background: "transparent",
+                      border: 0,
+                      cursor: "pointer",
                     }}
-                    title={`Xoá chương #${c.index_no}`}
                   >
                     🗑️ Xoá
                   </button>
@@ -346,7 +251,7 @@ export default function NovelChaptersPage() {
         </table>
       )}
 
-      {/* phân trang đơn giản */}
+      {/* phân trang */}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <button onClick={() => setPage(1)} disabled={page === 1}>
           « Đầu
@@ -379,7 +284,7 @@ export default function NovelChaptersPage() {
         </span>
       </div>
 
-      {/* Modal tạo chương */}
+      {/* Modal tạo */}
       {showCreate && (
         <div
           onClick={() => setShowCreate(false)}
@@ -404,7 +309,6 @@ export default function NovelChaptersPage() {
             }}
           >
             <h3 style={{ margin: 0 }}>Tạo chương mới</h3>
-
             <div style={{ fontSize: 13, color: "#555" }}>
               {nextIndexLoading ? (
                 "Đang tính số chương kế tiếp…"
@@ -416,7 +320,6 @@ export default function NovelChaptersPage() {
                 "Không tính được số chương kế tiếp"
               )}
             </div>
-
             <input
               placeholder="Tiêu đề chương"
               value={title}

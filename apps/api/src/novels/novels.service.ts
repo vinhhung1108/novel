@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { ILike, Repository } from "typeorm";
+import { DataSource, ILike, Repository } from "typeorm";
 import { Novel } from "../entities/novel.entity";
 import { CreateNovelDto } from "./dto/create-novel.dto";
 import { QueryFailedError } from "typeorm";
@@ -27,8 +27,49 @@ function slugifySafe(input: string): string {
 export class NovelsService {
   constructor(
     @InjectRepository(Novel)
-    private readonly novels: Repository<Novel>
+    private readonly novels: Repository<Novel>,
+    private readonly db: DataSource
   ) {}
+
+  async replaceNovelCategories(novel_id: string, category_ids: string[]) {
+    // xác nhận novel tồn tại
+    const novel = await this.novels.findOne({ where: { id: novel_id } });
+    if (!novel) throw new NotFoundException("Novel not found");
+
+    // thay thế toàn bộ
+    await this.db.transaction(async (trx) => {
+      await trx.query(
+        `DELETE FROM public.novel_categories WHERE novel_id = $1`,
+        [novel_id]
+      );
+      if (Array.isArray(category_ids) && category_ids.length) {
+        const values = category_ids.map((_, i) => `($1, $${i + 2})`).join(", ");
+        await trx.query(
+          `INSERT INTO public.novel_categories (novel_id, category_id) VALUES ${values}`,
+          [novel_id, ...category_ids]
+        );
+      }
+    });
+    return { ok: true };
+  }
+
+  async replaceNovelTags(novel_id: string, tag_ids: string[]) {
+    // Bảng nối tags của bạn đang dùng là gì? (trước đây có NovelTag entity).
+    // Ví dụ join-table tên public.novel_tags(novel_id, tag_id):
+    await this.db.transaction(async (trx) => {
+      await trx.query(`DELETE FROM public.novel_tags WHERE novel_id = $1`, [
+        novel_id,
+      ]);
+      if (Array.isArray(tag_ids) && tag_ids.length) {
+        const values = tag_ids.map((_, i) => `($1, $${i + 2})`).join(", ");
+        await trx.query(
+          `INSERT INTO public.novel_tags (novel_id, tag_id) VALUES ${values}`,
+          [novel_id, ...tag_ids]
+        );
+      }
+    });
+    return { ok: true };
+  }
 
   async list(
     page = 1,

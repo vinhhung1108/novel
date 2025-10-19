@@ -1,34 +1,46 @@
 "use client";
+
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { apiUrl } from "@/lib/api";
 import { useAuth } from "@/components/AuthProvider";
 import Time from "@/components/Time";
-import { API, apiFetch } from "../../lib/auth";
 
-const CDN =
-  process.env.NEXT_PUBLIC_S3_PUBLIC_BASE ?? "http://localhost:9000/novels";
 type Novel = {
   id: string;
   title: string;
   slug: string;
+  description?: string | null;
   cover_image_key?: string | null;
+  status?: string;
+  words_count?: string;
+  views?: string;
   updated_at: string;
 };
 
-type ListResp =
-  | Novel[]
-  | { items: Novel[]; total: number; page: number; limit: number };
-const toArray = (r: ListResp) => (Array.isArray(r) ? r : r.items || []);
+type ListResp = {
+  items: Novel[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+const CDN =
+  process.env.NEXT_PUBLIC_S3_PUBLIC_BASE ?? "http://localhost:9000/novels";
+const DEFAULT_LIMIT = 12;
 
 export default function NovelsListPage() {
-  const { token } = useAuth();
   const router = useRouter();
   const sp = useSearchParams();
+  const { token, getAuthHeader } = useAuth();
 
-  const [q, setQ] = useState(sp.get("q") || "");
-  const [page, setPage] = useState(Number(sp.get("page") || 1));
-  const [limit, setLimit] = useState(Number(sp.get("limit") || 12));
+  // state từ query
+  const [q, setQ] = useState<string>(sp.get("q") || "");
+  const [page, setPage] = useState<number>(Number(sp.get("page") || 1));
+  const [limit, setLimit] = useState<number>(
+    Number(sp.get("limit") || DEFAULT_LIMIT)
+  );
   const [sort, setSort] = useState<"updated_at" | "title">(
     (sp.get("sort") as any) || "updated_at"
   );
@@ -36,24 +48,26 @@ export default function NovelsListPage() {
     ((sp.get("order") || "DESC").toUpperCase() as any) || "DESC"
   );
 
+  // dữ liệu
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [items, setItems] = useState<Novel[]>([]);
   const [total, setTotal] = useState(0);
 
+  // bảo vệ login
   useEffect(() => {
     if (token === null) router.replace("/login");
   }, [token, router]);
 
-  // sync URL
+  // đồng bộ URL
   useEffect(() => {
-    const p = new URLSearchParams();
-    if (q.trim()) p.set("q", q.trim());
-    p.set("page", String(page));
-    p.set("limit", String(limit));
-    p.set("sort", sort);
-    p.set("order", order);
-    router.replace(`/novels/list?${p.toString()}`);
+    const params = new URLSearchParams();
+    if (q.trim()) params.set("q", q.trim());
+    params.set("page", String(page));
+    params.set("limit", String(limit));
+    params.set("sort", sort);
+    params.set("order", order);
+    router.replace(`/novels/list?${params.toString()}`);
   }, [q, page, limit, sort, order, router]);
 
   // debounce q
@@ -69,20 +83,26 @@ export default function NovelsListPage() {
       try {
         setLoading(true);
         setErr("");
-        const url = new URL(`${API}/v1/novels`);
+
+        const url = new URL(apiUrl("/novels"));
         url.searchParams.set("page", String(page));
         url.searchParams.set("limit", String(limit));
         url.searchParams.set("sort", sort);
         url.searchParams.set("order", order);
         if (debouncedQ.trim()) url.searchParams.set("q", debouncedQ.trim());
-        const res = await fetch(url, { cache: "no-store" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const res = await fetch(url.toString(), { cache: "no-store" });
+        if (!res.ok) {
+          setErr(`Không tải được danh sách truyện (${res.status})`);
+          setItems([]);
+          setTotal(0);
+          return;
+        }
         const data = (await res.json()) as ListResp;
-        const arr = toArray(data);
-        setItems(arr);
-        setTotal(Array.isArray(data) ? arr.length : data.total || 0);
+        setItems(Array.isArray((data as any).items) ? data.items : []);
+        setTotal(Number((data as any).total ?? 0));
       } catch (e: any) {
-        setErr(e?.message ?? "Lỗi");
+        setErr(e?.message ?? "Lỗi kết nối");
         setItems([]);
         setTotal(0);
       } finally {
@@ -91,78 +111,110 @@ export default function NovelsListPage() {
     })();
   }, [page, limit, sort, order, debouncedQ]);
 
+  // tính trang
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil((total || 0) / (limit || 12))),
+    () => Math.max(1, Math.ceil((total || 0) / (limit || DEFAULT_LIMIT))),
     [total, limit]
   );
+
+  // đảm bảo page hợp lệ khi totalPages thay đổi
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
     if (page < 1) setPage(1);
   }, [page, totalPages]);
+
+  // đổi filter → quay về trang 1
   useEffect(() => {
     setPage(1);
   }, [debouncedQ, limit, sort, order]);
 
-  const remove = async (id: string) => {
-    if (!confirm("Xoá truyện này? Hành động không thể hoàn tác.")) return;
-    const res = await apiFetch(
-      `/v1/novels/${id}`,
-      { method: "DELETE" },
-      token || undefined
+  const gotoFirst = () => setPage(1);
+  const prev = () => setPage((p) => Math.max(1, p - 1));
+  const next = () => setPage((p) => Math.min(totalPages, p + 1));
+  const gotoLast = () => setPage(totalPages);
+
+  // xoá 1 truyện
+  async function removeNovel(n: Novel) {
+    if (!token) return;
+    const ok = window.confirm(
+      `Xoá truyện "${n.title}"?\nHành động này không thể hoàn tác!`
     );
-    if (!res.ok) {
-      alert(`Xoá thất bại: ${await res.text()}`);
-      return;
+    if (!ok) return;
+
+    try {
+      const res = await fetch(apiUrl(`/novels/${encodeURIComponent(n.id)}`), {
+        method: "DELETE",
+        headers: { ...getAuthHeader() },
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        alert(`Xoá thất bại: ${res.status} ${t}`);
+        return;
+      }
+      // reload trang hiện tại
+      const url = new URL(apiUrl("/novels"));
+      url.searchParams.set("page", String(page));
+      url.searchParams.set("limit", String(limit));
+      url.searchParams.set("sort", sort);
+      url.searchParams.set("order", order);
+      if (debouncedQ.trim()) url.searchParams.set("q", debouncedQ.trim());
+      const r = await fetch(url.toString(), { cache: "no-store" });
+      const data = (await r.json()) as ListResp;
+      setItems(data.items);
+      setTotal(data.total);
+    } catch (e: any) {
+      alert(e?.message ?? "Lỗi kết nối");
     }
-    // refresh
-    const url = new URL(window.location.href);
-    router.replace(url.pathname + url.search);
-  };
+  }
 
   return (
-    <main style={{ display: "grid", gap: 16, padding: 24 }}>
-      <h1>Danh sách truyện</h1>
+    <main className="p-6 space-y-5">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Danh sách truyện</h1>
+        <Link
+          href="/novels/new"
+          className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50"
+        >
+          ➕ Thêm truyện mới
+        </Link>
+      </div>
 
-      <section
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr auto auto auto auto",
-          gap: 10,
-          alignItems: "center",
-          border: "1px solid #eee",
-          padding: 12,
-          borderRadius: 12,
-          background: "#fff",
-        }}
-      >
+      {/* Bộ lọc */}
+      <section className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto_auto] gap-3 items-center bg-white border border-gray-200 rounded-xl p-4">
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Tìm theo tiêu đề hoặc slug…"
-          style={{ minWidth: 240 }}
+          className="border rounded-lg px-3 py-2 min-w-60"
         />
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <label>Sort</label>
-          <select value={sort} onChange={(e) => setSort(e.target.value as any)}>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-600">Sort</label>
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as any)}
+            className="border rounded-lg px-2 py-1"
+          >
             <option value="updated_at">Cập nhật</option>
             <option value="title">Tiêu đề</option>
           </select>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <label>Order</label>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-600">Order</label>
           <select
             value={order}
             onChange={(e) => setOrder(e.target.value as any)}
+            className="border rounded-lg px-2 py-1"
           >
             <option value="DESC">↓ Desc</option>
             <option value="ASC">↑ Asc</option>
           </select>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <label>Limit</label>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-600">Limit</label>
           <select
             value={limit}
             onChange={(e) => setLimit(Number(e.target.value))}
+            className="border rounded-lg px-2 py-1"
           >
             {[12, 24, 36, 48, 60, 100].map((n) => (
               <option key={n} value={n}>
@@ -171,106 +223,74 @@ export default function NovelsListPage() {
             ))}
           </select>
         </div>
-        <Link href="/novels" style={btn}>
-          ➕ Tạo truyện
-        </Link>
+        <div className="text-right text-sm text-gray-600">
+          {loading
+            ? "Đang tải…"
+            : `Tổng: ${total} • Trang ${page}/${totalPages}`}
+        </div>
       </section>
 
-      <div style={{ fontSize: 13, color: "#444" }}>
-        {loading ? "Đang tải…" : `Tổng: ${total} • Trang ${page}/${totalPages}`}
-      </div>
-
-      <section style={{ display: "grid", gap: 14 }}>
+      {/* Grid items */}
+      <section>
         {loading ? (
           <div>Đang tải…</div>
         ) : err ? (
-          <div style={{ color: "crimson" }}>{err}</div>
+          <div className="text-red-600">{err}</div>
         ) : items.length === 0 ? (
           <div>Không có truyện nào.</div>
         ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-              gap: 14,
-            }}
-          >
+          <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(220px,1fr))]">
             {items.map((n) => (
               <div
                 key={n.id}
-                style={{
-                  border: "1px solid #eee",
-                  borderRadius: 12,
-                  overflow: "hidden",
-                  background: "#fff",
-                }}
+                className="bg-white border border-gray-200 rounded-xl overflow-hidden"
               >
-                <div
-                  style={{
-                    width: "100%",
-                    aspectRatio: "3/4",
-                    background: "#f5f5f5",
-                  }}
-                >
+                <div className="w-full aspect-[3/4] bg-gray-100">
                   {n.cover_image_key ? (
                     <img
                       src={`${CDN}/${n.cover_image_key}`}
                       alt={n.title}
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                        display: "block",
-                      }}
+                      className="w-full h-full object-cover block"
                     />
                   ) : null}
                 </div>
-                <div style={{ padding: 10, display: "grid", gap: 6 }}>
-                  <strong style={{ lineHeight: 1.25 }}>{n.title}</strong>
-                  <div style={{ fontSize: 12, color: "#666" }}>/{n.slug}</div>
-                  <div style={{ fontSize: 12, color: "#666" }}>
+                <div className="p-3 grid gap-2">
+                  <div className="font-medium leading-tight line-clamp-2">
+                    {n.title}
+                  </div>
+                  <div className="text-xs text-gray-600 break-all">
+                    /{n.slug}
+                  </div>
+                  <div className="text-xs text-gray-600">
                     Cập nhật: <Time value={n.updated_at} withTime />
                   </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 10,
-                      flexWrap: "wrap",
-                      marginTop: 6,
-                    }}
-                  >
+                  <div className="flex flex-wrap gap-3 pt-1">
                     <Link
                       href={`/novels/edit/${encodeURIComponent(n.slug)}`}
-                      style={{ fontSize: 13 }}
+                      className="text-sm hover:underline"
                     >
                       ✏️ Sửa
                     </Link>
                     <Link
                       href={`/novels/${encodeURIComponent(n.slug)}/chapters`}
-                      style={{ fontSize: 13 }}
+                      className="text-sm hover:underline"
                     >
                       📚 Chương
                     </Link>
-                    <button
-                      onClick={() => remove(n.id)}
-                      style={{
-                        fontSize: 13,
-                        color: "crimson",
-                        background: "transparent",
-                        border: 0,
-                        cursor: "pointer",
-                      }}
-                    >
-                      🗑️ Xoá
-                    </button>
                     <a
                       href={`http://localhost:3000/truyen/${encodeURIComponent(n.slug)}`}
                       target="_blank"
                       rel="noreferrer"
-                      style={{ fontSize: 13 }}
+                      className="text-sm hover:underline"
                     >
                       👁️ Xem web
                     </a>
+                    <button
+                      onClick={() => removeNovel(n)}
+                      className="text-sm text-red-600 hover:underline ml-auto"
+                    >
+                      🗑️ Xoá
+                    </button>
                   </div>
                 </div>
               </div>
@@ -279,42 +299,36 @@ export default function NovelsListPage() {
         )}
       </section>
 
-      <section
-        style={{
-          display: "flex",
-          gap: 8,
-          justifyContent: "center",
-          alignItems: "center",
-        }}
-      >
+      {/* Pagination */}
+      <section className="flex items-center gap-2 justify-center">
         <button
-          onClick={() => setPage(1)}
+          onClick={gotoFirst}
           disabled={page <= 1}
-          style={{ padding: 8 }}
+          className="px-2 py-1 border rounded disabled:opacity-50"
         >
           « Đầu
         </button>
         <button
-          onClick={() => setPage((p) => Math.max(1, p - 1))}
+          onClick={prev}
           disabled={page <= 1}
-          style={{ padding: 8 }}
+          className="px-2 py-1 border rounded disabled:opacity-50"
         >
           ← Trước
         </button>
-        <span>
+        <span className="px-2">
           Trang {page} / {totalPages}
         </span>
         <button
-          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+          onClick={next}
           disabled={page >= totalPages}
-          style={{ padding: 8 }}
+          className="px-2 py-1 border rounded disabled:opacity-50"
         >
           Sau →
         </button>
         <button
-          onClick={() => setPage(totalPages)}
+          onClick={gotoLast}
           disabled={page >= totalPages}
-          style={{ padding: 8 }}
+          className="px-2 py-1 border rounded disabled:opacity-50"
         >
           Cuối »
         </button>
@@ -322,11 +336,3 @@ export default function NovelsListPage() {
     </main>
   );
 }
-const btn: React.CSSProperties = {
-  padding: "8px 12px",
-  border: "1px solid #ddd",
-  borderRadius: 8,
-  textDecoration: "none",
-  color: "#111",
-  justifySelf: "end",
-};

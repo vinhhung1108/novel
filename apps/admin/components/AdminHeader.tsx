@@ -45,7 +45,6 @@ export default function AdminHeader() {
         <nav className="ml-4 flex items-center gap-1">
           <NavLink href="/">Dashboard</NavLink>
           <NavLink href="/novels/list">Truyện</NavLink>
-          <NavLink href="/novels">Tạo truyện</NavLink>
           {/* Nếu đã có route, bạn mở thêm:
           <NavLink href="/authors">Tác giả</NavLink>
           <NavLink href="/tags">Tag</NavLink>

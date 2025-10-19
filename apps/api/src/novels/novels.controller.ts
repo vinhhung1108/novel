@@ -59,4 +59,28 @@ export class NovelsController {
   remove(@Param("id", new ParseUUIDPipe()) id: string) {
     return this.svc.remove(id);
   }
+
+  @Post(":id/categories")
+  async setCategories(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() body: { category_ids: string[] }
+  ) {
+    await this.svc.replaceNovelCategories(
+      id,
+      Array.isArray(body?.category_ids) ? body.category_ids : []
+    );
+    return { ok: true };
+  }
+
+  @Post(":id/tags")
+  async setTags(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() body: { tag_ids: string[] }
+  ) {
+    await this.svc.replaceNovelTags(
+      id,
+      Array.isArray(body?.tag_ids) ? body.tag_ids : []
+    );
+    return { ok: true };
+  }
 }

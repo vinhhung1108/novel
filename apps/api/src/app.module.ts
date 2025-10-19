@@ -19,6 +19,7 @@ import { TagsModule } from "./modules/tags/tags.module";
 import { NovelsModule } from "./novels/novels.module";
 import { ChaptersModule } from "./modules/chapters/chapters.module";
 import { StatsModule } from "./modules/stats/stats.module";
+import { CategoriesModule } from "./modules/categories/categories.module";
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { StatsModule } from "./modules/stats/stats.module";
     NovelsModule,
     ChaptersModule,
     StatsModule,
+    CategoriesModule,
   ],
   controllers: [HealthController],
   providers: [],

@@ -16,7 +16,7 @@ import { UploadModule } from "./upload/upload.module";
 // Modules tách theo domain
 import { AuthorsModule } from "./modules/authors/authors.module";
 import { TagsModule } from "./modules/tags/tags.module";
-import { NovelsModule } from "./modules/novels/novels.module";
+import { NovelsModule } from "./novels/novels.module";
 import { ChaptersModule } from "./modules/chapters/chapters.module";
 import { StatsModule } from "./modules/stats/stats.module";
 

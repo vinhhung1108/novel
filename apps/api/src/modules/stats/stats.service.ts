@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { InjectDataSource } from "@nestjs/typeorm";
 import { DataSource } from "typeorm";
 
@@ -6,6 +6,7 @@ import { DataSource } from "typeorm";
 export class StatsService {
   constructor(@InjectDataSource() private readonly db: DataSource) {}
 
+  /** Tổng số thực thể */
   async overview() {
     const rows = await this.db.query(`
       SELECT
@@ -14,12 +15,14 @@ export class StatsService {
         (SELECT COUNT(*) FROM public.authors)::int  AS authors,
         (SELECT COUNT(*) FROM public.tags)::int     AS tags
     `);
-    return rows[0];
+    return rows[0] ?? { novels: 0, chapters: 0, authors: 0, tags: 0 };
   }
 
+  /** Chuỗi thời gian views theo day|week trong khoảng range */
   async series(granularity: "day" | "week", range: number) {
     if (range <= 0 || range > 365)
       throw new BadRequestException("range invalid");
+
     if (granularity === "day") {
       const rows = await this.db.query(
         `
@@ -35,11 +38,12 @@ export class StatsService {
         LEFT JOIN public.novel_views v ON v.view_date = d
         GROUP BY d
         ORDER BY d ASC
-      `,
+        `,
         [range]
       );
       return { items: rows };
     }
+
     const rows = await this.db.query(
       `
       WITH weeks AS (
@@ -61,6 +65,7 @@ export class StatsService {
     return { items: rows };
   }
 
+  /** Top truyện theo lượt xem trong N ngày */
   async top(days = 7, limit = 10) {
     if (days <= 0 || days > 3650) throw new BadRequestException("days invalid");
     if (limit <= 0 || limit > 100)
@@ -99,6 +104,7 @@ export class StatsService {
       },
       views: Number(r.sum_views || 0),
     }));
+
     return { items };
   }
 }

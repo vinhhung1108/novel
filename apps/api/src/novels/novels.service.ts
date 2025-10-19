@@ -6,8 +6,10 @@ import {
 import { InjectRepository } from "@nestjs/typeorm";
 import { ILike, Repository } from "typeorm";
 import { Novel } from "../entities/novel.entity";
+import { CreateNovelDto } from "./dto/create-novel.dto";
+import { QueryFailedError } from "typeorm";
 
-/** slugify an toàn (chuyển đ/Đ → d, bỏ dấu, giữ a-z0-9- ) */
+/** slugify an toàn (chuyển đ/Đ → d, bỏ dấu, giữ a-z0-9-) */
 function slugifySafe(input: string): string {
   if (!input) return "";
   return input
@@ -65,22 +67,24 @@ export class NovelsService {
   async slugExists(slug: string) {
     const s = slugifySafe(slug || "");
     if (!s || s !== slug) {
-      // không hợp lệ theo định dạng (chỉ a-z0-9-)
       return { exists: false, valid: false };
     }
     const found = await this.novels.findOne({ where: { slug: s } });
     return { exists: !!found, valid: true };
   }
 
-  async create(data: Partial<Novel>) {
+  async create(data: CreateNovelDto) {
     if (!data?.title?.trim()) {
       throw new BadRequestException("Title is required");
     }
-    const base = data.slug?.trim() || data.title;
-    let baseSlug = slugifySafe(base!);
+
+    // chuẩn hoá input
+    const title = data.title.trim();
+    const base = data.slug?.trim() || title;
+    const baseSlug = slugifySafe(base);
     if (!baseSlug) throw new BadRequestException("Cannot generate slug");
 
-    // ensure unique
+    // ensure unique slug
     let unique = baseSlug;
     for (let suffix = 2; ; suffix++) {
       const existed = await this.novels.findOne({ where: { slug: unique } });
@@ -89,37 +93,44 @@ export class NovelsService {
       if (suffix > 200) throw new BadRequestException("Slug overflow");
     }
 
-    const novel = await this.novels.save({
-      title: data.title!.trim(),
+    const entity: Partial<Novel> = {
+      title,
       slug: unique,
       description: data.description ?? "",
       cover_image_key: data.cover_image_key ?? null,
-      status: (data.status as any) || "ongoing",
-      source: data.source || "local",
-      source_url: data.source_url || null,
-      author_id: data.author_id || null,
+      status: "ongoing" as any,
+      source: "local",
+      source_url: null,
+      author_id: null,
       rating_avg: 0,
       rating_count: 0,
       words_count: "0",
       views: "0",
-      published_at: data.published_at || null,
+      published_at: null,
 
-      // các field mở rộng nếu bạn đã thêm (optional)
-      original_title: (data as any).original_title ?? null,
-      alt_titles: Array.isArray((data as any).alt_titles)
-        ? (data as any).alt_titles
-        : null,
-      language_code: (data as any).language_code ?? null,
-      is_featured: (data as any).is_featured ?? false,
-      mature: (data as any).mature ?? false,
-      priority:
-        typeof (data as any).priority === "number" ? (data as any).priority : 0,
-    });
+      original_title: data.original_title ?? null,
+      alt_titles: Array.isArray(data.alt_titles) ? data.alt_titles : null,
+      language_code: data.language_code ?? null,
+      is_featured: !!data.is_featured,
+      mature: !!data.mature,
+      priority: typeof data.priority === "number" ? data.priority : 0,
+    };
 
-    return novel;
+    try {
+      return await this.novels.save(entity);
+    } catch (e) {
+      // Convert lỗi DB → 400 dễ hiểu
+      if (e instanceof QueryFailedError) {
+        const msg = String(e.driverError?.detail || e.message || "");
+        if (msg.includes("already exists") || msg.includes("duplicate")) {
+          throw new BadRequestException("Slug already exists");
+        }
+      }
+      throw e;
+    }
   }
 
-  async update(id: string, data: Partial<Novel>) {
+  async update(id: string, data: Partial<CreateNovelDto>) {
     const novel = await this.novels.findOne({ where: { id } });
     if (!novel) throw new NotFoundException("Novel not found");
 
@@ -130,11 +141,17 @@ export class NovelsService {
       patch.description = data.description;
     if (typeof data.cover_image_key === "string")
       patch.cover_image_key = data.cover_image_key;
-    if (typeof data.status === "string") patch.status = data.status as any;
-    if (typeof data.source === "string") patch.source = data.source;
-    if (typeof data.source_url === "string") patch.source_url = data.source_url;
-    if (typeof data.author_id === "string") patch.author_id = data.author_id;
-    if (data.published_at !== undefined) patch.published_at = data.published_at;
+    if (typeof (data as any).status === "string")
+      patch.status = (data as any).status as any;
+
+    if (typeof (data as any).source === "string")
+      patch.source = (data as any).source;
+    if (typeof (data as any).source_url === "string")
+      patch.source_url = (data as any).source_url;
+    if (typeof (data as any).author_id === "string")
+      patch.author_id = (data as any).author_id;
+    if ((data as any).published_at !== undefined)
+      patch.published_at = (data as any).published_at as any;
 
     // update slug nếu gửi lên
     if (typeof data.slug === "string") {
@@ -149,20 +166,20 @@ export class NovelsService {
       }
     }
 
-    // các field mở rộng (nếu schema có)
-    if ("original_title" in (data as any))
-      patch.original_title = (data as any).original_title ?? null;
-    if ("alt_titles" in (data as any)) {
-      const arr = (data as any).alt_titles;
-      patch.alt_titles = Array.isArray(arr) ? arr : null;
+    // extra fields
+    if ("original_title" in data)
+      patch.original_title = data.original_title ?? null;
+    if ("alt_titles" in data) {
+      patch.alt_titles = Array.isArray(data.alt_titles)
+        ? data.alt_titles
+        : null;
     }
-    if ("language_code" in (data as any))
-      patch.language_code = (data as any).language_code ?? null;
-    if ("is_featured" in (data as any))
-      patch.is_featured = !!(data as any).is_featured;
-    if ("mature" in (data as any)) patch.mature = !!(data as any).mature;
-    if ("priority" in (data as any)) {
-      const pr = (data as any).priority;
+    if ("language_code" in data)
+      patch.language_code = data.language_code ?? null;
+    if ("is_featured" in data) patch.is_featured = !!data.is_featured;
+    if ("mature" in data) patch.mature = !!data.mature;
+    if ("priority" in data) {
+      const pr = data.priority;
       patch.priority = typeof pr === "number" ? pr : 0;
     }
 

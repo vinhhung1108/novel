@@ -1,7 +1,7 @@
-import { Controller, Get, Query } from "@nestjs/common";
+import { Controller, Get, Query, BadRequestException } from "@nestjs/common";
 import { StatsService } from "./stats.service";
 
-@Controller("v1/stats")
+@Controller("stats")
 export class StatsController {
   constructor(private readonly svc: StatsService) {}
 
@@ -12,14 +12,20 @@ export class StatsController {
 
   @Get("series")
   series(
-    @Query("granularity") g: "day" | "week" = "day",
-    @Query("range") r = "7"
+    @Query("granularity") granularity: "day" | "week" = "day",
+    @Query("range") range = "7"
   ) {
-    return this.svc.series(g, Number(r));
+    const r = Number(range);
+    if (!Number.isFinite(r)) throw new BadRequestException("range invalid");
+    return this.svc.series(granularity, r);
   }
 
   @Get("top")
   top(@Query("days") days = "7", @Query("limit") limit = "10") {
-    return this.svc.top(Number(days), Number(limit));
+    const d = Number(days);
+    const l = Number(limit);
+    if (!Number.isFinite(d) || !Number.isFinite(l))
+      throw new BadRequestException("invalid params");
+    return this.svc.top(d, l);
   }
 }

@@ -1,18 +1,21 @@
 import {
-  IsOptional,
-  IsString,
   IsArray,
   IsBoolean,
   IsInt,
+  IsOptional,
+  IsString,
+  MaxLength,
   Min,
 } from "class-validator";
 
 export class CreateNovelDto {
   @IsString()
+  @MaxLength(200)
   title!: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(200)
   slug?: string;
 
   @IsOptional()
@@ -21,13 +24,32 @@ export class CreateNovelDto {
 
   @IsOptional()
   @IsString()
-  cover_image_key?: string;
+  cover_image_key?: string | null;
 
-  // Các field mở rộng (nếu có trên DB của bạn)
-  @IsOptional() @IsString() original_title?: string | null;
-  @IsOptional() @IsArray() alt_titles?: string[] | null;
-  @IsOptional() @IsString() language_code?: string | null;
-  @IsOptional() @IsBoolean() is_featured?: boolean;
-  @IsOptional() @IsBoolean() mature?: boolean;
-  @IsOptional() @IsInt() @Min(0) priority?: number;
+  // extra fields (đã migrate ở 108)
+  @IsOptional()
+  @IsString()
+  original_title?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  alt_titles?: string[] | null;
+
+  @IsOptional()
+  @IsString()
+  language_code?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  is_featured?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  mature?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  priority?: number;
 }

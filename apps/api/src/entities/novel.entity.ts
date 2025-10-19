@@ -79,9 +79,17 @@ export class Novel {
   priority!: number;
   // -------------------------------
 
-  @CreateDateColumn({ type: "timestamptz" })
+  @CreateDateColumn({
+    name: "created_at",
+    type: "timestamptz",
+    default: () => "now()",
+  })
   created_at!: Date;
 
-  @UpdateDateColumn({ type: "timestamptz" })
+  @UpdateDateColumn({
+    name: "updated_at",
+    type: "timestamptz",
+    default: () => "now()",
+  })
   updated_at!: Date;
 }

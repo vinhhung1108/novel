@@ -8,26 +8,20 @@ import {
   useState,
   type ChangeEvent,
 } from "react";
-import Cropper from "react-easy-crop";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import Cropper from "react-easy-crop";
 import { useAuth } from "@/components/AuthProvider";
 import { apiUrl } from "@/lib/api";
 import { cropToWebp, fileToImage } from "@/lib/crop";
 import { slugifySafe } from "@/lib/slug";
 
-const COVER_W = 600;
-const COVER_H = 800;
-const ASPECT = 3 / 4;
-const CARD_CLASS = "grid gap-3 bg-white border border-gray-200 rounded-xl p-4";
 const CDN_BASE =
   process.env.NEXT_PUBLIC_S3_PUBLIC_BASE ?? "http://localhost:9000/novels";
 
-/* =========================
-   Types
-========================= */
-
-type Author = { id: string; name: string };
-type Tag = { id: string; name: string };
+const COVER_W = 600;
+const COVER_H = 800;
+const ASPECT = 3 / 4;
 
 type FormState = {
   title: string;
@@ -37,7 +31,7 @@ type FormState = {
 
   // extra
   originalTitle: string;
-  altTitles: string;
+  altTitles: string; // textarea, mỗi dòng 1 tên
   languageCode: string;
   isFeatured: boolean;
   mature: boolean;
@@ -45,11 +39,16 @@ type FormState = {
 
   // relations
   authorId: string | null;
-  tagIds: string[]; // multi
+  categoryIds: string[]; // nhiều thể loại
+  tagIds: string[]; // nhiều tag
 };
 
 type FormAction =
-  | { type: "set"; field: keyof FormState; value: FormState[keyof FormState] }
+  | {
+      type: "set";
+      field: keyof FormState;
+      value: FormState[keyof FormState];
+    }
   | { type: "setMany"; values: Partial<FormState> };
 
 type CropArea = { x: number; y: number; width: number; height: number };
@@ -61,11 +60,14 @@ type SlugStatus =
   | "invalid"
   | "error";
 
+type Option = { id: string; name: string };
+
 const INITIAL_FORM: FormState = {
   title: "",
   slug: "",
   autoSlug: true,
   description: "",
+
   originalTitle: "",
   altTitles: "",
   languageCode: "vi",
@@ -74,6 +76,7 @@ const INITIAL_FORM: FormState = {
   priority: 0,
 
   authorId: null,
+  categoryIds: [],
   tagIds: [],
 };
 
@@ -88,10 +91,6 @@ function formReducer(state: FormState, action: FormAction): FormState {
   }
 }
 
-/* =========================
-   Page
-========================= */
-
 export default function AdminCreateNovelPage() {
   const router = useRouter();
   const { token, getAuthHeader } = useAuth();
@@ -101,6 +100,7 @@ export default function AdminCreateNovelPage() {
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // Cover workflow
   const {
     image,
     pickFile,
@@ -114,20 +114,21 @@ export default function AdminCreateNovelPage() {
     setUploadedKey,
   } = useCoverWorkflow();
 
-  // bảo vệ login
+  // Bảo vệ
   useEffect(() => {
     if (token === null) router.replace("/login");
   }, [token, router]);
 
-  // auto-slug
+  // Auto slug theo title
   useEffect(() => {
     if (!form.autoSlug) return;
     const next = slugifySafe(form.title);
-    if (next !== form.slug)
+    if (next !== form.slug) {
       dispatch({ type: "set", field: "slug", value: next });
+    }
   }, [form.title, form.autoSlug, form.slug]);
 
-  // check slug
+  // Kiểm tra slug trùng
   const slugStatus = useSlugAvailability(form.slug);
 
   const disabled = useMemo(() => {
@@ -153,7 +154,7 @@ export default function AdminCreateNovelPage() {
         return { text: "Slug đã tồn tại", tone: "danger" as const };
       case "invalid":
         return {
-          text: "Slug không hợp lệ (a-z, 0-9, dấu -)",
+          text: "Slug không hợp lệ (chỉ gồm a-z, 0-9 và dấu gạch ngang)",
           tone: "danger" as const,
         };
       case "error":
@@ -163,44 +164,12 @@ export default function AdminCreateNovelPage() {
     }
   }, [slugStatus]);
 
-  /* --------- Authors & Tags --------- */
+  // Dữ liệu liên quan
+  const authors = useOptions("/authors");
+  const categories = useOptions("/categories");
+  const tags = useOptions("/tags");
 
-  const {
-    q: authorQ,
-    setQ: setAuthorQ,
-    loading: loadingAuthors,
-    options: authorOptions,
-    reload: reloadAuthors,
-  } = useRemoteOptions<Author>({
-    endpoint: "/authors",
-    labelKey: "name",
-    minChars: 0,
-  });
-
-  const {
-    q: tagQ,
-    setQ: setTagQ,
-    loading: loadingTags,
-    options: tagOptions,
-    reload: reloadTags,
-    createOne: createTag,
-  } = useRemoteOptions<Tag>({
-    endpoint: "/tags",
-    labelKey: "name",
-    minChars: 0,
-    createEndpoint: "/tags", // POST { name }
-    getAuthHeader,
-  });
-
-  // lần đầu tải options
-  useEffect(() => {
-    reloadAuthors();
-    reloadTags();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* --------- File change / crop --------- */
-
+  // Chọn ảnh
   const handleFileChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       try {
@@ -216,6 +185,7 @@ export default function AdminCreateNovelPage() {
     [pickFile]
   );
 
+  // Crop complete
   const onCropComplete = useCallback(
     (_: unknown, areaPixels: CropArea) => {
       setCropArea({
@@ -228,6 +198,7 @@ export default function AdminCreateNovelPage() {
     [setCropArea]
   );
 
+  // Convert ảnh sang webp
   const handleConvert = useCallback(async () => {
     if (!image) {
       setMsg("Chưa chọn ảnh");
@@ -241,13 +212,13 @@ export default function AdminCreateNovelPage() {
     setMsg("Đã crop & chuyển WebP ✓");
   }, [computeWebp, image]);
 
-  /* --------- Upload cover --------- */
-
+  // Upload cover
   const uploadCover = useCallback(async (): Promise<string | null> => {
     if (!coverBlob) {
       setMsg("Chưa có ảnh WebP để upload");
       return null;
     }
+
     setUploading(true);
     setMsg("");
     try {
@@ -260,21 +231,25 @@ export default function AdminCreateNovelPage() {
         body: JSON.stringify({ ext: "webp", contentType: "image/webp" }),
         cache: "no-store",
       });
+
       if (!presignRes.ok) {
         const text = await presignRes.text();
         setMsg(`Không lấy được URL ký sẵn: ${presignRes.status} ${text}`);
         return null;
       }
+
       const { url, key } = await presignRes.json();
       const putRes = await fetch(url, {
         method: "PUT",
         headers: { "Content-Type": "image/webp" },
         body: coverBlob,
       });
+
       if (!putRes.ok) {
         setMsg(`Upload cover thất bại: ${putRes.status}`);
         return null;
       }
+
       setMsg("Đã upload cover ✓");
       setUploadedKey(key);
       return key as string;
@@ -286,8 +261,7 @@ export default function AdminCreateNovelPage() {
     }
   }, [coverBlob, getAuthHeader, setUploadedKey]);
 
-  /* --------- Submit --------- */
-
+  // Submit tạo truyện
   const handleSubmit = useCallback(async () => {
     if (disabled) return;
 
@@ -295,21 +269,20 @@ export default function AdminCreateNovelPage() {
     setMsg("");
 
     try {
-      // upload cover nếu cần
       let keyToUse = uploadedKey;
       if (coverBlob && !keyToUse) {
         keyToUse = await uploadCover();
         if (!keyToUse) return;
       }
 
-      // Tạo novel
       const payload: any = {
         title: form.title.trim(),
         slug: form.slug.trim(),
         description: form.description,
         cover_image_key: keyToUse ?? undefined,
+        author_id: form.authorId ?? undefined,
 
-        // extra fields (đã có cột trong DB)
+        // extra
         original_title: form.originalTitle.trim() || undefined,
         alt_titles: form.altTitles
           .split("\n")
@@ -319,9 +292,6 @@ export default function AdminCreateNovelPage() {
         is_featured: form.isFeatured,
         mature: form.mature,
         priority: Number.isFinite(form.priority) ? form.priority : 0,
-
-        // relations
-        author_id: form.authorId ?? undefined,
       };
 
       const res = await fetch(apiUrl("/novels"), {
@@ -341,10 +311,27 @@ export default function AdminCreateNovelPage() {
 
       const novel = await res.json();
 
-      // Gắn tags (nếu backend có endpoint). Nếu 404 thì bỏ qua.
+      // Gắn categories
+      if (form.categoryIds.length > 0) {
+        try {
+          const r = await fetch(apiUrl(`/novels/${novel.id}/categories`), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...getAuthHeader(),
+            },
+            body: JSON.stringify({ category_ids: form.categoryIds }),
+          });
+          if (!r.ok && r.status !== 404) {
+            console.warn("Attach categories failed:", r.status);
+          }
+        } catch {}
+      }
+
+      // Gắn tags
       if (form.tagIds.length > 0) {
         try {
-          const attach = await fetch(apiUrl(`/novels/${novel.id}/tags`), {
+          const r = await fetch(apiUrl(`/novels/${novel.id}/tags`), {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -352,19 +339,16 @@ export default function AdminCreateNovelPage() {
             },
             body: JSON.stringify({ tag_ids: form.tagIds }),
           });
-          // Nếu API chưa tồn tại — bỏ qua (đừng chặn user)
-          if (!attach.ok && attach.status !== 404) {
-            // soft-warning
-            // eslint-disable-next-line no-console
-            console.warn("Attach tags failed:", attach.status);
+          if (!r.ok && r.status !== 404) {
+            console.warn("Attach tags failed:", r.status);
           }
-        } catch {
-          // ignore
-        }
+        } catch {}
       }
 
       setMsg("Đã tạo truyện ✓");
+      // mở web xem
       window.open(`http://localhost:3000/truyen/${novel.slug}`, "_blank");
+      // quay về danh sách
       router.replace("/novels/list");
     } catch (error: any) {
       setMsg(error?.message ?? "Lỗi kết nối");
@@ -376,6 +360,7 @@ export default function AdminCreateNovelPage() {
     disabled,
     form.altTitles,
     form.authorId,
+    form.categoryIds,
     form.description,
     form.languageCode,
     form.mature,
@@ -395,14 +380,20 @@ export default function AdminCreateNovelPage() {
   const isErrorMessage =
     msg.startsWith("Lỗi") || msg.startsWith("Không") || msg.startsWith("Chưa");
 
-  /* --------- UI --------- */
-
   return (
-    <main className="p-6 max-w-6xl mx-auto space-y-5">
-      <h1 className="text-2xl font-semibold">Tạo truyện</h1>
+    <main className="p-6 max-w-6xl mx-auto space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">➕ Tạo truyện mới</h1>
+        <Link
+          href="/novels/list"
+          className="px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-50"
+        >
+          ← Quay lại danh sách
+        </Link>
+      </div>
 
-      {/* Thông tin cơ bản */}
-      <section className={CARD_CLASS}>
+      {/* Cơ bản */}
+      <section className="grid gap-3 bg-white border border-gray-200 rounded-xl p-4">
         <input
           className="border rounded-lg px-3 py-2"
           placeholder="Tiêu đề"
@@ -412,218 +403,64 @@ export default function AdminCreateNovelPage() {
           }
         />
 
-        {/* Slug */}
-        <div className="flex items-center gap-3">
-          <input
-            className="border rounded-lg px-3 py-2 flex-1"
-            placeholder="Slug (auto từ tiêu đề nếu bật Auto)"
-            value={form.slug}
-            onChange={(e) => {
-              dispatch({ type: "set", field: "slug", value: e.target.value });
-              dispatch({ type: "set", field: "autoSlug", value: false });
-            }}
-          />
-          <label className="flex items-center gap-2 text-sm">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-3">
             <input
-              type="checkbox"
-              checked={form.autoSlug}
-              onChange={(e) =>
+              className="border rounded-lg px-3 py-2 flex-1"
+              placeholder="Slug (auto từ tiêu đề nếu bật Auto)"
+              value={form.slug}
+              onChange={(e) => {
+                dispatch({ type: "set", field: "slug", value: e.target.value });
                 dispatch({
                   type: "set",
                   field: "autoSlug",
-                  value: e.target.checked,
-                })
-              }
-            />
-            Auto
-          </label>
-          <button
-            onClick={() =>
-              dispatch({
-                type: "set",
-                field: "slug",
-                value: slugifySafe(form.title),
-              })
-            }
-            className="border rounded-lg px-3 py-2"
-            type="button"
-          >
-            Tạo từ tiêu đề
-          </button>
-        </div>
-
-        {form.slug && slugFeedback.text ? (
-          <p
-            className={
-              slugFeedback.tone === "danger"
-                ? "text-sm text-red-600"
-                : slugFeedback.tone === "positive"
-                  ? "text-sm text-green-600"
-                  : "text-sm text-gray-600"
-            }
-          >
-            {slugFeedback.text}
-          </p>
-        ) : null}
-      </section>
-
-      {/* Tác giả & Tags (thể loại) */}
-      <section className={CARD_CLASS}>
-        {/* Tác giả (search + chọn) */}
-        <div className="grid gap-2">
-          <label className="text-sm text-gray-700">Tác giả</label>
-          <div className="flex gap-2">
-            <input
-              className="border rounded-lg px-3 py-2 flex-1"
-              placeholder="Tìm tác giả…"
-              value={authorQ}
-              onChange={(e) => setAuthorQ(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") reloadAuthors();
+                  value: false,
+                });
               }}
             />
-            <button
-              className="border rounded-lg px-3 py-2"
-              type="button"
-              onClick={reloadAuthors}
-            >
-              {loadingAuthors ? "Đang tìm…" : "Tải"}
-            </button>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <select
-              className="border rounded-lg px-3 py-2 min-w-56"
-              value={form.authorId ?? ""}
-              onChange={(e) =>
-                dispatch({
-                  type: "set",
-                  field: "authorId",
-                  value: e.target.value || null,
-                })
-              }
-            >
-              <option value="">— Không chọn —</option>
-              {authorOptions.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-            {form.authorId && (
-              <button
-                className="border rounded-lg px-3 py-2"
-                type="button"
-                onClick={() =>
-                  dispatch({ type: "set", field: "authorId", value: null })
-                }
-              >
-                Bỏ chọn
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Tags (thể loại) — multi select + tạo nhanh */}
-        <div className="grid gap-2">
-          <label className="text-sm text-gray-700">
-            Thể loại / Tags (chọn nhiều)
-          </label>
-
-          <div className="flex gap-2">
-            <input
-              className="border rounded-lg px-3 py-2 flex-1"
-              placeholder="Tìm tag…"
-              value={tagQ}
-              onChange={(e) => setTagQ(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") reloadTags();
-              }}
-            />
-            <button
-              className="border rounded-lg px-3 py-2"
-              type="button"
-              onClick={reloadTags}
-            >
-              {loadingTags ? "Đang tìm…" : "Tải"}
-            </button>
-            <button
-              className="border rounded-lg px-3 py-2"
-              type="button"
-              onClick={async () => {
-                const name = tagQ.trim();
-                if (!name) return;
-                const created = await createTag?.({ name });
-                if (created) {
-                  reloadTags();
-                  // auto chọn tag mới
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.autoSlug}
+                onChange={(e) =>
                   dispatch({
                     type: "set",
-                    field: "tagIds",
-                    value: Array.from(new Set([...form.tagIds, created.id])),
-                  });
+                    field: "autoSlug",
+                    value: e.target.checked,
+                  })
                 }
-              }}
+              />
+              Auto
+            </label>
+            <button
+              onClick={() =>
+                dispatch({
+                  type: "set",
+                  field: "slug",
+                  value: slugifySafe(form.title),
+                })
+              }
+              className="border rounded-lg px-3 py-2"
+              type="button"
             >
-              ➕ Tạo tag
+              Tạo từ tiêu đề
             </button>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <select
-              className="border rounded-lg px-3 py-2 min-w-56"
-              onChange={(e) => {
-                const id = e.target.value;
-                if (!id) return;
-                dispatch({
-                  type: "set",
-                  field: "tagIds",
-                  value: Array.from(new Set([...form.tagIds, id])),
-                });
-                e.currentTarget.selectedIndex = 0;
-              }}
+          {form.slug && slugFeedback.text ? (
+            <p
+              className={clsx(
+                "text-sm",
+                slugFeedback.tone === "danger" && "text-red-600",
+                slugFeedback.tone === "positive" && "text-green-600",
+                slugFeedback.tone === "muted" && "text-gray-600"
+              )}
             >
-              <option value="">— Chọn thêm tag —</option>
-              {tagOptions.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-
-            {/* đã chọn */}
-            <div className="flex flex-wrap gap-2">
-              {form.tagIds.map((id) => {
-                const t = tagOptions.find((x) => x.id === id);
-                const label = t?.name ?? id.slice(0, 6);
-                return (
-                  <span
-                    key={id}
-                    className="px-2 py-1 rounded-full bg-gray-100 border text-sm flex items-center gap-2"
-                  >
-                    {label}
-                    <button
-                      type="button"
-                      className="text-gray-500 hover:text-red-600"
-                      onClick={() =>
-                        dispatch({
-                          type: "set",
-                          field: "tagIds",
-                          value: form.tagIds.filter((x) => x !== id),
-                        })
-                      }
-                    >
-                      ×
-                    </button>
-                  </span>
-                );
-              })}
-            </div>
-          </div>
+              {slugFeedback.text}
+            </p>
+          ) : null}
         </div>
-      </section>
 
-      {/* Thông tin mở rộng */}
-      <section className={CARD_CLASS}>
         <textarea
           className="border rounded-lg px-3 py-2 min-h-32"
           placeholder="Mô tả"
@@ -636,7 +473,128 @@ export default function AdminCreateNovelPage() {
             })
           }
         />
+      </section>
 
+      {/* Liên quan: Tác giả / Thể loại / Tags */}
+      <section className="grid gap-4 bg-white border border-gray-200 rounded-xl p-4">
+        {/* Author */}
+        <div className="grid gap-2">
+          <div className="font-medium">Tác giả</div>
+          <SearchSelect
+            placeholder="Tìm tác giả…"
+            items={authors.items}
+            loading={authors.loading}
+            q={authors.q}
+            setQ={authors.setQ}
+            value={form.authorId}
+            onChange={(v) =>
+              dispatch({ type: "set", field: "authorId", value: v })
+            }
+            allowNone
+            footer={
+              <CreateInline
+                label="Tạo tác giả"
+                onCreate={async (name) => {
+                  const ok = await authors.createOne(name);
+                  if (ok) {
+                    // reload & gán authorId theo tên vừa tạo
+                    await authors.reload();
+                    const found = authors.items.find((a) => a.name === name);
+                    if (found) {
+                      dispatch({
+                        type: "set",
+                        field: "authorId",
+                        value: found.id,
+                      });
+                    }
+                  }
+                }}
+              />
+            }
+          />
+        </div>
+
+        {/* Categories */}
+        <div className="grid gap-2">
+          <div className="font-medium">Thể loại (nhiều)</div>
+          <MultiPick
+            placeholder="Tìm thể loại…"
+            items={categories.items}
+            loading={categories.loading}
+            q={categories.q}
+            setQ={categories.setQ}
+            selected={form.categoryIds}
+            onToggle={(id) => {
+              const set = new Set(form.categoryIds);
+              if (set.has(id)) set.delete(id);
+              else set.add(id);
+              dispatch({ type: "set", field: "categoryIds", value: [...set] });
+            }}
+            footer={
+              <CreateInline
+                label="Tạo thể loại"
+                onCreate={async (name) => {
+                  const ok = await categories.createOne(name);
+                  if (ok) {
+                    await categories.reload();
+                    const found = categories.items.find((c) => c.name === name);
+                    if (found) {
+                      dispatch({
+                        type: "set",
+                        field: "categoryIds",
+                        value: Array.from(
+                          new Set([...form.categoryIds, found.id])
+                        ),
+                      });
+                    }
+                  }
+                }}
+              />
+            }
+          />
+        </div>
+
+        {/* Tags */}
+        <div className="grid gap-2">
+          <div className="font-medium">Tags (nhiều)</div>
+          <MultiPick
+            placeholder="Tìm tag…"
+            items={tags.items}
+            loading={tags.loading}
+            q={tags.q}
+            setQ={tags.setQ}
+            selected={form.tagIds}
+            onToggle={(id) => {
+              const set = new Set(form.tagIds);
+              if (set.has(id)) set.delete(id);
+              else set.add(id);
+              dispatch({ type: "set", field: "tagIds", value: [...set] });
+            }}
+            footer={
+              <CreateInline
+                label="Tạo tag"
+                onCreate={async (name) => {
+                  const ok = await tags.createOne(name);
+                  if (ok) {
+                    await tags.reload();
+                    const found = tags.items.find((t) => t.name === name);
+                    if (found) {
+                      dispatch({
+                        type: "set",
+                        field: "tagIds",
+                        value: Array.from(new Set([...form.tagIds, found.id])),
+                      });
+                    }
+                  }
+                }}
+              />
+            }
+          />
+        </div>
+      </section>
+
+      {/* Extra fields */}
+      <section className="grid gap-3 bg-white border border-gray-200 rounded-xl p-4">
         <div className="grid md:grid-cols-2 gap-3">
           <input
             className="border rounded-lg px-3 py-2"
@@ -652,7 +610,7 @@ export default function AdminCreateNovelPage() {
           />
           <input
             className="border rounded-lg px-3 py-2"
-            placeholder="Mã ngôn ngữ (language_code) — ví dụ: vi, en, ja…"
+            placeholder="Mã ngôn ngữ (language_code), ví dụ: vi, en, ja…"
             value={form.languageCode}
             onChange={(e) =>
               dispatch({
@@ -674,7 +632,7 @@ export default function AdminCreateNovelPage() {
               })
             }
           />
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-6 col-span-full">
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -723,8 +681,8 @@ export default function AdminCreateNovelPage() {
         </div>
       </section>
 
-      {/* Ảnh bìa & crop */}
-      <section className={CARD_CLASS}>
+      {/* Ảnh bìa */}
+      <section className="grid gap-3 bg-white border border-gray-200 rounded-xl p-4">
         <input type="file" accept="image/*" onChange={handleFileChange} />
         {image && (
           <div className="grid gap-3">
@@ -797,7 +755,7 @@ export default function AdminCreateNovelPage() {
         )}
       </section>
 
-      {/* Submit */}
+      {/* Actions */}
       <div className="flex items-center gap-3">
         <button
           disabled={disabled}
@@ -817,9 +775,9 @@ export default function AdminCreateNovelPage() {
   );
 }
 
-/* =========================
-   Hooks & helpers
-========================= */
+/* ============================
+   Hooks & mini components
+============================ */
 
 function useCoverWorkflow() {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
@@ -873,15 +831,6 @@ function useCoverWorkflow() {
   };
 }
 
-function useDebouncedValue<T>(value: T, delay = 300) {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const handle = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(handle);
-  }, [value, delay]);
-  return debounced;
-}
-
 function useSlugAvailability(input: string): SlugStatus {
   const [status, setStatus] = useState<SlugStatus>("idle");
   const slug = useDebouncedValue(input.trim(), 350);
@@ -900,14 +849,22 @@ function useSlugAvailability(input: string): SlugStatus {
     async function check() {
       setStatus("checking");
       try {
-        const res = await fetch(
+        // ưu tiên /novels/slug-exists?slug=...
+        let res = await fetch(
           apiUrl(`/novels/slug-exists?slug=${encodeURIComponent(slug)}`),
           { cache: "no-store" }
         );
+        // nếu API cũ dạng /slug-exists/:slug, fallback
+        if (res.status === 404) {
+          res = await fetch(apiUrl(`/novels/slug-exists/${slug}`), {
+            cache: "no-store",
+          });
+        }
         if (!res.ok) throw new Error("Slug check failed");
         const data = await res.json();
-        if (!cancelled)
+        if (!cancelled) {
           setStatus(Boolean(data?.exists) ? "taken" : "available");
+        }
       } catch {
         if (!cancelled) setStatus("error");
       }
@@ -921,71 +878,230 @@ function useSlugAvailability(input: string): SlugStatus {
   return status;
 }
 
-/**
- * Tải danh sách options từ API (authors/tags), có tìm kiếm, debounce nhẹ.
- * - GET {endpoint}?q=...
- * - (optional) POST createEndpoint để tạo nhanh (tags)
- */
-function useRemoteOptions<T extends { id: string }>({
-  endpoint,
-  labelKey,
-  minChars = 0,
-  getAuthHeader,
-  createEndpoint,
-}: {
-  endpoint: string;
-  labelKey: keyof T & string;
-  minChars?: number;
-  getAuthHeader?: () => Record<string, string>;
-  createEndpoint?: string; // nếu có => cho phép tạo nhanh
-}) {
+function useDebouncedValue<T>(value: T, delay = 300) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const handle = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(handle);
+  }, [value, delay]);
+  return debounced;
+}
+
+function clsx(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
+
+/** Tải danh sách options (authors/categories/tags) với tìm kiếm & tạo nhanh */
+function useOptions(endpoint: "/authors" | "/categories" | "/tags") {
+  const { getAuthHeader } = useAuth();
   const [q, setQ] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [options, setOptions] = useState<T[]>([]);
   const qDebounced = useDebouncedValue(q, 300);
 
-  const reload = useCallback(async () => {
-    if (qDebounced.length < minChars && qDebounced.length !== 0) return;
-    setLoading(true);
-    try {
-      const url = new URL(apiUrl(endpoint));
-      if (qDebounced.trim()) url.searchParams.set("q", qDebounced.trim());
-      const res = await fetch(url.toString(), { cache: "no-store" });
-      if (!res.ok) {
-        setOptions([]);
-        return;
-      }
-      const data = await res.json();
-      // API của bạn có thể trả mảng hoặc {items}
-      const arr: T[] = Array.isArray(data) ? data : data.items || [];
-      setOptions(Array.isArray(arr) ? arr : []);
-    } finally {
-      setLoading(false);
-    }
-  }, [endpoint, qDebounced, minChars]);
+  const [items, setItems] = useState<Option[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const createOne = createEndpoint
-    ? async (body: Record<string, any>): Promise<T | null> => {
-        try {
-          const res = await fetch(apiUrl(createEndpoint), {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...(getAuthHeader ? getAuthHeader() : {}),
-            },
-            body: JSON.stringify(body),
-          });
-          if (!res.ok) return null;
-          return (await res.json()) as T;
-        } catch {
-          return null;
-        }
+  const fetchList = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true);
+      try {
+        const url = new URL(apiUrl(endpoint));
+        if (qDebounced.trim()) url.searchParams.set("q", qDebounced.trim());
+        const res = await fetch(url.toString(), { cache: "no-store", signal });
+        if (!res.ok) throw new Error(`load ${endpoint} failed`);
+        const json = await res.json();
+        const list = Array.isArray(json) ? json : json.items || [];
+        const mapped: Option[] = list.map((x: any) => ({
+          id: x.id,
+          name: x.name,
+        }));
+        setItems(mapped);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn("load options error", endpoint, e);
+        setItems([]);
+      } finally {
+        setLoading(false);
       }
-    : undefined;
+    },
+    [endpoint, qDebounced]
+  );
 
   useEffect(() => {
-    reload();
-  }, [reload]);
+    const ctrl = new AbortController();
+    fetchList(ctrl.signal);
+    return () => ctrl.abort();
+  }, [fetchList]);
 
-  return { q, setQ, loading, options, reload, createOne };
+  const createOne = useCallback(
+    async (name: string) => {
+      try {
+        const res = await fetch(apiUrl(endpoint), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...getAuthHeader() },
+          body: JSON.stringify({ name, slug: slugifySafe(name) }),
+        });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    },
+    [endpoint, getAuthHeader]
+  );
+
+  const reload = useCallback(async () => {
+    await fetchList();
+  }, [fetchList]);
+
+  return { q, setQ, items, loading, reload, createOne };
+}
+
+/* ---------- UI tiny pieces ---------- */
+
+function SearchSelect(props: {
+  placeholder?: string;
+  items: Option[];
+  loading: boolean;
+  q: string;
+  setQ: (s: string) => void;
+  value: string | null;
+  onChange: (v: string | null) => void;
+  allowNone?: boolean;
+  footer?: React.ReactNode;
+}) {
+  const {
+    placeholder,
+    items,
+    loading,
+    q,
+    setQ,
+    value,
+    onChange,
+    allowNone,
+    footer,
+  } = props;
+  return (
+    <div className="grid gap-2">
+      <input
+        className="border rounded-lg px-3 py-2"
+        placeholder={placeholder}
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+      />
+      <div className="max-h-56 overflow-auto border rounded-lg">
+        {loading ? (
+          <div className="p-3 text-sm text-gray-600">Đang tải…</div>
+        ) : (
+          <ul className="divide-y">
+            {allowNone && (
+              <li
+                className={clsx(
+                  "p-2 cursor-pointer hover:bg-gray-50",
+                  value === null && "bg-gray-100"
+                )}
+                onClick={() => onChange(null)}
+              >
+                (Không chọn)
+              </li>
+            )}
+            {items.length === 0 ? (
+              <li className="p-2 text-sm text-gray-600">Không có dữ liệu</li>
+            ) : (
+              items.map((opt) => (
+                <li
+                  key={opt.id}
+                  className={clsx(
+                    "p-2 cursor-pointer hover:bg-gray-50",
+                    value === opt.id && "bg-gray-100"
+                  )}
+                  onClick={() => onChange(opt.id)}
+                >
+                  {opt.name}
+                </li>
+              ))
+            )}
+          </ul>
+        )}
+      </div>
+      {footer ? <div className="pt-2">{footer}</div> : null}
+    </div>
+  );
+}
+
+function MultiPick(props: {
+  placeholder?: string;
+  items: Option[];
+  loading: boolean;
+  q: string;
+  setQ: (s: string) => void;
+  selected: string[];
+  onToggle: (id: string) => void;
+  footer?: React.ReactNode;
+}) {
+  const { placeholder, items, loading, q, setQ, selected, onToggle, footer } =
+    props;
+  return (
+    <div className="grid gap-2">
+      <input
+        className="border rounded-lg px-3 py-2"
+        placeholder={placeholder}
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+      />
+      <div className="max-h-56 overflow-auto border rounded-lg">
+        {loading ? (
+          <div className="p-3 text-sm text-gray-600">Đang tải…</div>
+        ) : items.length === 0 ? (
+          <div className="p-3 text-sm text-gray-600">Không có dữ liệu</div>
+        ) : (
+          <ul className="divide-y">
+            {items.map((opt) => {
+              const checked = selected.includes(opt.id);
+              return (
+                <li key={opt.id} className="p-2 flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => onToggle(opt.id)}
+                  />
+                  <span>{opt.name}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+      {footer ? <div className="pt-2">{footer}</div> : null}
+    </div>
+  );
+}
+
+function CreateInline(props: {
+  label: string;
+  onCreate: (name: string) => Promise<boolean>;
+}) {
+  const { label, onCreate } = props;
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        className="border rounded-lg px-3 py-2"
+        placeholder={`${label} (nhanh)`}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      />
+      <button
+        className="px-3 py-2 rounded-lg border border-gray-300 disabled:opacity-50"
+        disabled={!name.trim() || busy}
+        onClick={async () => {
+          setBusy(true);
+          const ok = await onCreate(name.trim());
+          setBusy(false);
+          if (ok) setName("");
+        }}
+      >
+        {busy ? "Đang tạo…" : label}
+      </button>
+    </div>
+  );
 }

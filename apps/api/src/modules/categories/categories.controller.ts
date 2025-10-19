@@ -11,7 +11,7 @@ import {
 } from "@nestjs/common";
 import { CategoriesService } from "./categories.service";
 
-@Controller("v1/categories")
+@Controller("categories")
 export class CategoriesController {
   constructor(private readonly svc: CategoriesService) {}
 
@@ -37,5 +37,20 @@ export class CategoriesController {
   @Delete(":id")
   remove(@Param("id", ParseUUIDPipe) id: string) {
     return this.svc.remove(id);
+  }
+
+  @Get("slug-exists/:slug")
+  slugExistsParam(@Param("slug") slug: string) {
+    return this.svc.slugExists(slug);
+  }
+
+  @Get("slug-exists")
+  slugExistsQuery(@Query("slug") slug = "") {
+    return this.svc.slugExists(slug);
+  }
+
+  @Get(":id")
+  getOne(@Param("id", ParseUUIDPipe) id: string) {
+    return this.svc.getById(id);
   }
 }

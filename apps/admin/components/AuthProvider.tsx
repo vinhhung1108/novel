@@ -29,7 +29,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [token]);
 
   const getAuthHeader = useMemo(
-    () => () => (token ? { Authorization: `Bearer ${token}` } : {}),
+    () => () =>
+      token
+        ? { Authorization: `Bearer ${token}` }
+        : ({} as Record<string, string>),
     [token]
   );
 
@@ -45,4 +48,8 @@ export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used within <AuthProvider>");
   return ctx;
+}
+
+export function logout() {
+  localStorage.removeItem("adm_token");
 }

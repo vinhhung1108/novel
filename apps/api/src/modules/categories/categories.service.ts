@@ -29,6 +29,8 @@ export class CategoriesService {
   ) {}
 
   async list(page = 1, limit = 50, q?: string) {
+    page = Math.max(1, Number(page) || 1);
+    limit = Math.min(200, Math.max(1, Number(limit) || 50));
     const where = q
       ? [{ name: ILike(`%${q}%`) }, { slug: ILike(`%${q}%`) }]
       : undefined;
@@ -99,5 +101,16 @@ export class CategoriesService {
     if (!cat) throw new NotFoundException("Category not found");
     await this.categories.delete({ id });
     return { ok: true };
+  }
+
+  getById(id: string) {
+    return this.categories.findOne({ where: { id } });
+  }
+
+  async slugExists(slug: string) {
+    const s = slugifySafe(slug || "");
+    if (!s || s !== slug) return { exists: false, valid: false };
+    const found = await this.categories.findOne({ where: { slug: s } });
+    return { exists: !!found, valid: true };
   }
 }

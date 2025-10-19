@@ -1,16 +1,13 @@
-/** Tạo slug “an toàn” cho tiếng Việt (chuyển đ→d, loại dấu, chuẩn hoá) */
+/** slugifySafe: chuyển “đ/Đ” thành “d”, bỏ dấu, giữ [a-z0-9-] */
 export function slugifySafe(input: string): string {
-  return input
+  if (!input) return "";
+  const s = input
+    .replace(/[đĐ]/g, "d")
     .toLowerCase()
-    .replace(/đ/g, "d") // đ → d (đã toLowerCase nên không cần Đ)
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // bỏ dấu tổ hợp
-    .replace(/[^a-z0-9]+/g, "-") // giữ a-z0-9, còn lại thành "-"
-    .replace(/-+/g, "-") // gộp nhiều dấu "-"
-    .replace(/^-|-$/g, ""); // bỏ "-" đầu/cuối
-}
-
-/** Kiểm tra slug hợp lệ theo quy ước hệ thống */
-export function isValidSlug(s: string): boolean {
-  return /^[a-z0-9-]+$/.test(s) && s === s.toLowerCase();
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return s;
 }

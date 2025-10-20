@@ -1,12 +1,14 @@
 import {
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
   IsUUID,
   Min,
 } from "class-validator";
+import { NovelSource, NovelStatus } from "@/entities/novel.entity";
 
 export class CreateNovelDto {
   @IsString()
@@ -55,4 +57,20 @@ export class CreateNovelDto {
   @IsOptional()
   @IsUUID()
   author_id?: string;
+
+  @IsOptional()
+  @IsIn(["ongoing", "completed", "hiatus"])
+  status?: NovelStatus;
+
+  @IsOptional()
+  @IsIn(["local", "crawler"])
+  source?: NovelSource;
+
+  @IsOptional()
+  @IsString()
+  source_url?: string | null;
+
+  @IsOptional()
+  @IsString()
+  published_at?: string | null;
 }

@@ -2,6 +2,7 @@
 "use client";
 import React, {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -12,6 +13,7 @@ type AuthContextType = {
   token: string | null;
   setToken: (t: string | null) => void;
   getAuthHeader: () => Record<string, string>;
+  logout: () => void;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -36,9 +38,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [token]
   );
 
+  const logout = useCallback(() => {
+    setToken(null);
+    localStorage.removeItem("adm_token");
+  }, []);
+
   const value = useMemo<AuthContextType>(
-    () => ({ token, setToken, getAuthHeader }),
-    [token, getAuthHeader]
+    () => ({ token, setToken, getAuthHeader, logout }),
+    [token, getAuthHeader, logout]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -48,8 +55,4 @@ export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used within <AuthProvider>");
   return ctx;
-}
-
-export function logout() {
-  localStorage.removeItem("adm_token");
 }

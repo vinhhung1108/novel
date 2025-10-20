@@ -1,13 +1,17 @@
 import { useEffect, useState } from "react";
-import type { SlugStatus } from "@/lib/novels/types";
+import type { SlugStatus } from "@/app/lib/novels/types";
 import { apiUrl } from "@/app/lib/api";
 
-export function useSlugAvailability(input: string): SlugStatus {
+export function useSlugAvailability(
+  input: string,
+  current?: string
+): SlugStatus {
   const [status, setStatus] = useState<SlugStatus>("idle");
   const slug = useDebouncedValue(input.trim(), 350);
 
   useEffect(() => {
     if (!slug) return void setStatus("idle");
+    if (current && slug === current) return void setStatus("available");
     if (!/^[a-z0-9-]+$/.test(slug)) return void setStatus("invalid");
 
     let cancelled = false;
@@ -35,7 +39,7 @@ export function useSlugAvailability(input: string): SlugStatus {
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, [slug, current]);
   return status;
 }
 // small shared util (can live here or separate)

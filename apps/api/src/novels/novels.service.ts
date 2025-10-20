@@ -5,7 +5,8 @@ import {
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { DataSource, ILike, Repository } from "typeorm";
-import { Novel, NovelSource, NovelStatus } from "../entities/novel.entity";
+import { Novel } from "../entities/novel.entity";
+import { StorageService } from "@/upload/storage.service";
 import { CreateNovelDto } from "./dto/create-novel.dto";
 import { QueryFailedError } from "typeorm";
 
@@ -23,20 +24,15 @@ function slugifySafe(input: string): string {
     .replace(/^-|-$/g, "");
 }
 
-type UpdateNovelInput = Partial<
-  CreateNovelDto &
-    Pick<
-      Novel,
-      "status" | "source" | "source_url" | "author_id" | "published_at"
-    >
->;
+type UpdateNovelInput = Partial<CreateNovelDto>;
 
 @Injectable()
 export class NovelsService {
   constructor(
     @InjectRepository(Novel)
     private readonly novels: Repository<Novel>,
-    private readonly db: DataSource
+    private readonly db: DataSource,
+    private readonly storage: StorageService
   ) {}
 
   async replaceNovelCategories(novel_id: string, category_ids: string[]) {
@@ -110,8 +106,25 @@ export class NovelsService {
     return { items, total, page, limit };
   }
 
-  getBySlug(slug: string) {
-    return this.novels.findOne({ where: { slug } });
+  async getBySlug(slug: string) {
+    const novel = await this.novels.findOne({ where: { slug } });
+    if (!novel) return null;
+
+    const categoryRows: { category_id: string }[] = await this.db.query(
+      `SELECT category_id FROM public.novel_categories WHERE novel_id = $1`,
+      [novel.id]
+    );
+
+    const tagRows: { tag_id: string }[] = await this.db.query(
+      `SELECT tag_id FROM public.novel_tags WHERE novel_id = $1`,
+      [novel.id]
+    );
+
+    return {
+      ...novel,
+      category_ids: categoryRows.map((row) => row.category_id),
+      tag_ids: tagRows.map((row) => row.tag_id),
+    };
   }
 
   async slugExists(slug: string) {
@@ -148,15 +161,15 @@ export class NovelsService {
       slug: unique,
       description: data.description ?? "",
       cover_image_key: data.cover_image_key ?? null,
-      status: "ongoing" as NovelStatus,
-      source: "local" as NovelSource,
-      source_url: null,
-      author_id: null,
+      status: data.status ?? "ongoing",
+      source: data.source ?? "local",
+      source_url: data.source_url ?? null,
+      author_id: data.author_id ?? null,
       rating_avg: 0,
       rating_count: 0,
       words_count: "0",
       views: "0",
-      published_at: null,
+      published_at: data.published_at ? new Date(data.published_at) : null,
 
       original_title: data.original_title ?? null,
       alt_titles: Array.isArray(data.alt_titles) ? data.alt_titles : null,
@@ -195,7 +208,10 @@ export class NovelsService {
     if (data.source) patch.source = data.source;
     if ("source_url" in data) patch.source_url = data.source_url ?? null;
     if ("author_id" in data) patch.author_id = data.author_id ?? null;
-    if ("published_at" in data) patch.published_at = data.published_at ?? null;
+    if ("published_at" in data)
+      patch.published_at = data.published_at
+        ? new Date(data.published_at)
+        : null;
 
     // update slug nếu gửi lên
     if (typeof data.slug === "string") {
@@ -234,6 +250,9 @@ export class NovelsService {
   async remove(id: string) {
     const novel = await this.novels.findOne({ where: { id } });
     if (!novel) throw new NotFoundException("Novel not found");
+    if (novel.cover_image_key) {
+      await this.storage.deleteObject(novel.cover_image_key);
+    }
     await this.novels.delete({ id });
     return { ok: true };
   }

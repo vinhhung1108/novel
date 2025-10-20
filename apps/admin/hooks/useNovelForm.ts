@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useReducer } from "react";
-import type { FormState } from "@/lib/novels/types";
-import { nextSlugFromTitle } from "@/lib/novels/helpers";
+import type { FormState } from "@/app/lib/novels/types";
+import { nextSlugFromTitle } from "@/app/lib/novels/helpers";
 
 export const INITIAL_FORM: FormState = {
   title: "",
@@ -16,6 +16,10 @@ export const INITIAL_FORM: FormState = {
   authorId: "",
   categoryIds: [],
   tagIds: [],
+  status: "ongoing",
+  source: "local",
+  sourceUrl: "",
+  publishedAt: "",
 };
 
 type FormAction =

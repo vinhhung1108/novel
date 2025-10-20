@@ -9,7 +9,6 @@ import {
   Body,
   ParseUUIDPipe,
 } from "@nestjs/common";
-import type { Novel } from "@/entities/novel.entity";
 import { NovelsService } from "./novels.service";
 import { CreateNovelDto } from "./dto/create-novel.dto";
 import { UpdateNovelDto } from "./dto/update-novel.dto";

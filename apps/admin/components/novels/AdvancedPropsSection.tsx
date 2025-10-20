@@ -1,6 +1,12 @@
 "use client";
-import { CARD } from "@/lib/novels/constants";
-import type { FormState } from "@/lib/novels/types";
+import { CARD } from "@/app/lib/novels/constants";
+import type { FormState } from "@/app/lib/novels/types";
+
+const STATUS_OPTIONS = [
+  { value: "ongoing", label: "Đang ra" },
+  { value: "completed", label: "Hoàn thành" },
+  { value: "hiatus", label: "Tạm dừng" },
+];
 
 export function AdvancedPropsSection({
   originalTitle,
@@ -15,6 +21,14 @@ export function AdvancedPropsSection({
   setMatureAction,
   priority,
   setPriorityAction,
+  status,
+  setStatusAction,
+  source,
+  setSourceAction,
+  sourceUrl,
+  setSourceUrlAction,
+  publishedAt,
+  setPublishedAtAction,
 }: {
   originalTitle: FormState["originalTitle"];
   setOriginalTitleAction: (v: string) => void;
@@ -28,6 +42,14 @@ export function AdvancedPropsSection({
   setMatureAction: (v: boolean) => void;
   priority: FormState["priority"];
   setPriorityAction: (v: number) => void;
+  status: FormState["status"];
+  setStatusAction: (v: string) => void;
+  source: FormState["source"];
+  setSourceAction: (v: string) => void;
+  sourceUrl: FormState["sourceUrl"];
+  setSourceUrlAction: (v: string) => void;
+  publishedAt: FormState["publishedAt"];
+  setPublishedAtAction: (v: string) => void;
 }) {
   return (
     <section className={CARD}>
@@ -50,6 +72,47 @@ export function AdvancedPropsSection({
           value={altTitles}
           onChange={(e) => setAltTitlesAction(e.target.value)}
         />
+        <label className="flex items-center gap-2">
+          Trạng thái
+          <select
+            className="border rounded-lg px-2 py-1"
+            value={status}
+            onChange={(e) => setStatusAction(e.target.value)}
+          >
+            {STATUS_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2">
+          Nguồn
+          <input
+            className="border rounded-lg px-2 py-1"
+            value={source}
+            onChange={(e) => setSourceAction(e.target.value)}
+            placeholder="local / crawler"
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          URL nguồn
+          <input
+            className="border rounded-lg px-2 py-1 flex-1"
+            value={sourceUrl}
+            onChange={(e) => setSourceUrlAction(e.target.value)}
+            placeholder="https://..."
+          />
+        </label>
+        <label className="flex items-center gap-2">
+          Ngày phát hành
+          <input
+            type="date"
+            className="border rounded-lg px-2 py-1"
+            value={publishedAt}
+            onChange={(e) => setPublishedAtAction(e.target.value)}
+          />
+        </label>
         <div className="flex items-center gap-6 col-span-full">
           <label className="flex items-center gap-2">
             <input

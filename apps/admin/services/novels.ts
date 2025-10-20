@@ -1,10 +1,20 @@
-import { apiGet, apiPost, AuthHeaderGetter } from "./apiClient";
+import {
+  apiDelete,
+  apiGet,
+  apiPatch,
+  apiPost,
+  AuthHeaderGetter,
+} from "./apiClient";
 import type {
   Author,
   Category,
   Tag,
   CreateNovelPayload,
-} from "@/lib/novels/types"; // adjust path if needed
+  NovelDetail,
+  NovelListResponse,
+  NovelSummary,
+  UpdateNovelPayload,
+} from "@/app/lib/novels/types";
 
 export const fetchAuthors = () => apiGet<Author[]>(`/authors?page=1&limit=500`);
 export const fetchCategories = () =>
@@ -12,10 +22,39 @@ export const fetchCategories = () =>
 export const fetchTags = () =>
   apiGet<{ items: Tag[] } | Tag[]>(`/tags?page=1&limit=500`);
 
+export const fetchNovelBySlug = (slug: string) =>
+  apiGet<NovelDetail>(`/novels/${encodeURIComponent(slug)}`);
+
 export const createNovel = (
   payload: CreateNovelPayload,
   getAuthHeader: AuthHeaderGetter
 ) => apiPost(`/novels`, payload, getAuthHeader);
+
+export const updateNovel = (
+  id: string,
+  payload: UpdateNovelPayload,
+  getAuthHeader: AuthHeaderGetter
+) => apiPatch<NovelDetail>(`/novels/${id}`, payload, getAuthHeader);
+
+export const listNovels = (params: {
+  page?: number;
+  limit?: number;
+  sort?: "title" | "updated_at";
+  order?: "ASC" | "DESC";
+  q?: string;
+}) => {
+  const search = new URLSearchParams();
+  if (params.page) search.set("page", String(params.page));
+  if (params.limit) search.set("limit", String(params.limit));
+  if (params.sort) search.set("sort", params.sort);
+  if (params.order) search.set("order", params.order);
+  if (params.q && params.q.trim()) search.set("q", params.q.trim());
+  const query = search.toString();
+  return apiGet<NovelListResponse>(`/novels${query ? `?${query}` : ""}`);
+};
+
+export const deleteNovel = (id: string, getAuthHeader: AuthHeaderGetter) =>
+  apiDelete(`/novels/${id}`, getAuthHeader);
 
 export async function saveRelations(
   novelId: string,

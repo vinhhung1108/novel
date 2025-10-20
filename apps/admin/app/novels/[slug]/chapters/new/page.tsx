@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useAuth } from "../../../../components/AuthProvider";
+import { useAuth } from "@/components/AuthProvider";
 
 const API = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:4000";
 

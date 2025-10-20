@@ -1,7 +1,7 @@
 "use client";
-import { CARD } from "@/lib/novels/constants";
-import type { SlugStatus } from "@/lib/novels/types";
-import { clsx } from "@/lib/ui/clsx";
+import { CARD } from "@/app/lib/novels/constants";
+import type { SlugStatus } from "@/app/lib/novels/types";
+import { clsx } from "@/app/lib/ui/clsx";
 import { slugifySafe } from "@/app/lib/slug";
 
 export function BasicInfoSection({

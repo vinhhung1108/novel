@@ -11,13 +11,16 @@ import { MessageBar } from "@/components/novels/MessageBar";
 import { useCoverWorkflow } from "@/hooks/useCoverWorkflow";
 import { useNovelForm, useSubmitDisabled } from "@/hooks/useNovelForm";
 import { useSlugAvailability } from "@/hooks/useSlugAvailability";
-import { buildCreatePayload } from "@/lib/novels/helpers";
+import {
+  buildCreatePayload,
+  normalizeCollection,
+} from "@/app/lib/novels/helpers";
 import type {
   Author,
   Category,
   Tag,
   CropArea,
-} from "@/lib/novels/types";
+} from "@/app/lib/novels/types";
 import {
   fetchAuthors,
   fetchCategories,
@@ -85,7 +88,7 @@ export default function AdminCreateNovelPage() {
       if (cancelled) return;
 
       if (authorsRes.status === "fulfilled") {
-        setAuthors(authorsRes.value ?? []);
+        setAuthors(normalizeCollection(authorsRes.value));
       }
       if (categoriesRes.status === "fulfilled") {
         setCategories(normalizeCollection(categoriesRes.value));
@@ -288,6 +291,22 @@ export default function AdminCreateNovelPage() {
         setPriorityAction={(value) =>
           dispatch({ type: "set", field: "priority", value })
         }
+        status={form.status}
+        setStatusAction={(value) =>
+          dispatch({ type: "set", field: "status", value })
+        }
+        source={form.source}
+        setSourceAction={(value) =>
+          dispatch({ type: "set", field: "source", value })
+        }
+        sourceUrl={form.sourceUrl}
+        setSourceUrlAction={(value) =>
+          dispatch({ type: "set", field: "sourceUrl", value })
+        }
+        publishedAt={form.publishedAt}
+        setPublishedAtAction={(value) =>
+          dispatch({ type: "set", field: "publishedAt", value })
+        }
       />
 
       <RelationsSection
@@ -335,14 +354,4 @@ export default function AdminCreateNovelPage() {
       </div>
     </main>
   );
-}
-
-function normalizeCollection<T>(
-  input: T[] | { items: T[] } | null | undefined
-): T[] {
-  if (Array.isArray(input)) return input;
-  if (input && Array.isArray((input as { items?: T[] }).items)) {
-    return (input as { items: T[] }).items;
-  }
-  return [];
 }

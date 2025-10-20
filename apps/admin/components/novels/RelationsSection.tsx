@@ -1,7 +1,7 @@
 "use client";
-import { CARD } from "@/lib/novels/constants";
-import { clsx } from "@/lib/ui/clsx";
-import type { Author, Category, Tag } from "@/lib/novels/types";
+import { CARD } from "@/app/lib/novels/constants";
+import { clsx } from "@/app/lib/ui/clsx";
+import type { Author, Category, Tag } from "@/app/lib/novels/types";
 
 export function RelationsSection({
   authors,

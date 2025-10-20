@@ -2,72 +2,82 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useMemo } from "react";
 import { useAuth } from "@/components/AuthProvider";
 
-function NavLink({
-  href,
-  children,
-}: {
-  href: string;
-  children: React.ReactNode;
-}) {
-  const pathname = usePathname();
-  const active =
-    pathname === href ||
-    (href !== "/" && pathname?.startsWith(href) && href !== "/login");
-  return (
-    <Link
-      href={href}
-      className={`px-3 py-2 rounded-lg text-sm no-underline ${
-        active ? "bg-zinc-900 text-white" : "text-zinc-800 hover:bg-zinc-100"
-      }`}
-    >
-      {children}
-    </Link>
-  );
-}
+const navItems = [
+  { href: "/", label: "Dashboard", icon: "📊" },
+  { href: "/novels/list", label: "Truyện", icon: "📚" },
+  { href: "/categories", label: "Thể loại", icon: "🗂️" },
+  { href: "/tags", label: "Tags", icon: "🏷️" },
+  { href: "/authors", label: "Tác giả", icon: "✍️" },
+];
 
 export default function AdminHeader() {
   const { token, logout } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
-  const doLogout = () => {
-    logout?.();
+  const renderedNav = useMemo(
+    () =>
+      navItems.map((item) => {
+        const active =
+          pathname === item.href ||
+          (item.href !== "/" && pathname?.startsWith(item.href));
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
+              active
+                ? "bg-zinc-900 text-white shadow"
+                : "text-zinc-700 hover:bg-zinc-100"
+            }`}
+          >
+            <span aria-hidden="true">{item.icon}</span>
+            <span>{item.label}</span>
+          </Link>
+        );
+      }),
+    [pathname]
+  );
+
+  const authAction = () => {
+    if (!token) {
+      router.push("/login");
+      return;
+    }
+    logout();
     router.replace("/login");
   };
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b bg-white/80 backdrop-blur">
-      <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4">
-        <Link href="/" className="font-semibold text-zinc-900">
-          Admin
+    <header className="sticky top-0 z-40 w-full border-b border-zinc-200 bg-white/90 backdrop-blur">
+      <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4">
+        <Link href="/" className="flex items-center gap-2 text-lg font-semibold">
+          <span className="grid h-8 w-8 place-items-center rounded-full bg-zinc-900 text-white">
+            A
+          </span>
+          <span className="text-zinc-900">Admin Console</span>
         </Link>
-        <nav className="ml-4 flex items-center gap-1">
-          <NavLink href="/">Dashboard</NavLink>
-          <NavLink href="/novels/list">Truyện</NavLink>
-          <NavLink href="/categories">🗂️ Thể loại</NavLink>
-          <NavLink href="/tags">Tag</NavLink>
-          <NavLink href="/authors">Tác giả</NavLink>
+
+        <nav className="ml-6 hidden items-center gap-1 md:flex">
+          {renderedNav}
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
-          {token ? (
-            <button
-              onClick={doLogout}
-              className="rounded-lg border px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-100"
-            >
-              Đăng xuất
-            </button>
-          ) : (
-            <Link
-              href="/login"
-              className="rounded-lg border px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-100"
-            >
-              Đăng nhập
-            </Link>
-          )}
+          <button
+            onClick={authAction}
+            className="inline-flex items-center rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100"
+          >
+            {token ? "Đăng xuất" : "Đăng nhập"}
+          </button>
         </div>
       </div>
+
+      <nav className="mx-auto flex items-center gap-1 px-4 pb-3 pt-2 md:hidden">
+        {renderedNav}
+      </nav>
     </header>
   );
 }

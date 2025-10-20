@@ -1,7 +1,7 @@
 "use client";
 import Cropper from "react-easy-crop";
-import { CARD, ASPECT, CDN_BASE } from "@/lib/novels/constants";
-import type { CropArea } from "@/lib/novels/types";
+import { CARD, ASPECT, CDN_BASE } from "@/app/lib/novels/constants";
+import type { CropArea } from "@/app/lib/novels/types";
 
 type Props = {
   image: HTMLImageElement | null;
@@ -15,6 +15,7 @@ type Props = {
   uploading: boolean;
   coverPreview: string | null;
   uploadedKey: string | null;
+  showPicker?: boolean;
 };
 
 export function CoverCropperSection({
@@ -29,14 +30,17 @@ export function CoverCropperSection({
   uploading,
   coverPreview,
   uploadedKey,
+  showPicker = true,
 }: Props) {
   return (
     <section className={CARD}>
-      <input
-        type="file"
-        accept="image/*"
-        onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
-      />
+      {showPicker && (
+        <input
+          type="file"
+          accept="image/*"
+          onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+        />
+      )}
       {image && (
         <div className="grid gap-3">
           <div className="relative w-[600px] h-[400px] bg-black rounded-xl overflow-hidden">

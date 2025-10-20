@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
-import type { CropArea } from "@/lib/novels/types";
-import { COVER_W, COVER_H } from "@/lib/novels/constants";
+import type { CropArea } from "@/app/lib/novels/types";
+import { COVER_W, COVER_H } from "@/app/lib/novels/constants";
 import { cropToWebp, fileToImage } from "@/app/lib/crop";
 
 export function useCoverWorkflow() {
@@ -52,5 +52,13 @@ export function useCoverWorkflow() {
     preview,
     uploadedKey,
     setUploadedKey,
+    reset: () => {
+      setImage(null);
+      setCropArea(null);
+      setZoom(1);
+      setBlob(null);
+      setPreview(null);
+      setUploadedKey(null);
+    },
   };
 }

@@ -16,7 +16,6 @@ async function bootstrap() {
   });
   app.use(helmet());
   await app.listen(Number(process.env.API_PORT || 4000));
-  // eslint-disable-next-line no-console
   console.log(
     `API listening on http://localhost:${process.env.API_PORT || 4000}`
   );

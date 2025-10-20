@@ -15,7 +15,7 @@ import { CreateChapterDto } from "./dto/create-chapter.dto";
 import { CreateChapterAutoDto } from "./dto/create-chapter-auto.dto";
 import { BulkDeleteDto } from "./dto/bulk-delete.dto";
 
-@Controller("v1/novels/:novel_id/chapters")
+@Controller("novels/:novel_id/chapters")
 export class ChaptersController {
   constructor(private readonly svc: ChaptersService) {}
 

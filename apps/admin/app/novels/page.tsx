@@ -16,7 +16,7 @@ import { cropToWebp, fileToImage } from "@/lib/crop";
 import { slugifySafe } from "@/lib/slug";
 
 const COVER_W = 600;
-the const COVER_H = 800;
+const COVER_H = 800;
 const ASPECT = 3 / 4;
 const CDN_BASE =
   process.env.NEXT_PUBLIC_S3_PUBLIC_BASE ?? "http://localhost:9000/novels";
@@ -39,7 +39,13 @@ type FormAction =
   | { type: "setMany"; values: Partial<FormState> };
 
 type CropArea = { x: number; y: number; width: number; height: number };
-type SlugStatus = "idle" | "checking" | "available" | "taken" | "invalid" | "error";
+type SlugStatus =
+  | "idle"
+  | "checking"
+  | "available"
+  | "taken"
+  | "invalid"
+  | "error";
 
 const INITIAL_FORM: FormState = {
   title: "",
@@ -310,7 +316,9 @@ export default function AdminCreateNovelPage() {
           className="border rounded-lg px-3 py-2"
           placeholder="Tiêu đề"
           value={form.title}
-          onChange={(e) => dispatch({ type: "set", field: "title", value: e.target.value })}
+          onChange={(e) =>
+            dispatch({ type: "set", field: "title", value: e.target.value })
+          }
         />
 
         <div className="flex items-center gap-3">
@@ -327,12 +335,24 @@ export default function AdminCreateNovelPage() {
             <input
               type="checkbox"
               checked={form.autoSlug}
-              onChange={(e) => dispatch({ type: "set", field: "autoSlug", value: e.target.checked })}
+              onChange={(e) =>
+                dispatch({
+                  type: "set",
+                  field: "autoSlug",
+                  value: e.target.checked,
+                })
+              }
             />
             Auto
           </label>
           <button
-            onClick={() => dispatch({ type: "set", field: "slug", value: slugifySafe(form.title) })}
+            onClick={() =>
+              dispatch({
+                type: "set",
+                field: "slug",
+                value: slugifySafe(form.title),
+              })
+            }
             className="border rounded-lg px-3 py-2"
             type="button"
           >
@@ -346,8 +366,8 @@ export default function AdminCreateNovelPage() {
               slugFeedback.tone === "danger"
                 ? "text-sm text-red-600"
                 : slugFeedback.tone === "positive"
-                ? "text-sm text-green-600"
-                : "text-sm text-gray-600"
+                  ? "text-sm text-green-600"
+                  : "text-sm text-gray-600"
             }
           >
             {slugFeedback.text}
@@ -361,7 +381,13 @@ export default function AdminCreateNovelPage() {
           className="border rounded-lg px-3 py-2 min-h-32"
           placeholder="Mô tả"
           value={form.description}
-          onChange={(e) => dispatch({ type: "set", field: "description", value: e.target.value })}
+          onChange={(e) =>
+            dispatch({
+              type: "set",
+              field: "description",
+              value: e.target.value,
+            })
+          }
         />
 
         <div className="grid md:grid-cols-2 gap-3">
@@ -369,26 +395,50 @@ export default function AdminCreateNovelPage() {
             className="border rounded-lg px-3 py-2"
             placeholder="Tên gốc (original_title)"
             value={form.originalTitle}
-            onChange={(e) => dispatch({ type: "set", field: "originalTitle", value: e.target.value })}
+            onChange={(e) =>
+              dispatch({
+                type: "set",
+                field: "originalTitle",
+                value: e.target.value,
+              })
+            }
           />
           <input
             className="border rounded-lg px-3 py-2"
             placeholder="Mã ngôn ngữ (language_code) — ví dụ: vi, en, ja…"
             value={form.languageCode}
-            onChange={(e) => dispatch({ type: "set", field: "languageCode", value: e.target.value })}
+            onChange={(e) =>
+              dispatch({
+                type: "set",
+                field: "languageCode",
+                value: e.target.value,
+              })
+            }
           />
           <textarea
             className="border rounded-lg px-3 py-2 col-span-full min-h-24"
             placeholder={"Tên thay thế (alt_titles)\nMỗi dòng 1 tên"}
             value={form.altTitles}
-            onChange={(e) => dispatch({ type: "set", field: "altTitles", value: e.target.value })}
+            onChange={(e) =>
+              dispatch({
+                type: "set",
+                field: "altTitles",
+                value: e.target.value,
+              })
+            }
           />
           <div className="flex items-center gap-6">
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
                 checked={form.isFeatured}
-                onChange={(e) => dispatch({ type: "set", field: "isFeatured", value: e.target.checked })}
+                onChange={(e) =>
+                  dispatch({
+                    type: "set",
+                    field: "isFeatured",
+                    value: e.target.checked,
+                  })
+                }
               />
               Featured
             </label>
@@ -396,7 +446,13 @@ export default function AdminCreateNovelPage() {
               <input
                 type="checkbox"
                 checked={form.mature}
-                onChange={(e) => dispatch({ type: "set", field: "mature", value: e.target.checked })}
+                onChange={(e) =>
+                  dispatch({
+                    type: "set",
+                    field: "mature",
+                    value: e.target.checked,
+                  })
+                }
               />
               Mature
             </label>
@@ -408,7 +464,11 @@ export default function AdminCreateNovelPage() {
                 value={form.priority}
                 onChange={(e) => {
                   const next = Number(e.target.value);
-                  dispatch({ type: "set", field: "priority", value: Number.isFinite(next) ? next : 0 });
+                  dispatch({
+                    type: "set",
+                    field: "priority",
+                    value: Number.isFinite(next) ? next : 0,
+                  });
                 }}
               />
             </label>
@@ -445,7 +505,11 @@ export default function AdminCreateNovelPage() {
                 onChange={(e) => setZoom(Number(e.target.value))}
                 className="w-64"
               />
-              <button onClick={handleConvert} className="border rounded-lg px-3 py-2" type="button">
+              <button
+                onClick={handleConvert}
+                className="border rounded-lg px-3 py-2"
+                type="button"
+              >
                 Cắt & Convert WebP
               </button>
               <button
@@ -463,14 +527,22 @@ export default function AdminCreateNovelPage() {
             <div className="flex items-center gap-4">
               <div className="w-40 h-[213px] bg-gray-100 rounded-lg grid place-items-center overflow-hidden">
                 {coverPreview ? (
-                  <img src={coverPreview} alt="Preview (WebP)" className="w-full h-full object-cover" />
+                  <img
+                    src={coverPreview}
+                    alt="Preview (WebP)"
+                    className="w-full h-full object-cover"
+                  />
                 ) : (
                   <span className="text-gray-500 text-sm">Preview WebP</span>
                 )}
               </div>
               {uploadedKey && (
                 <div className="w-40 h-[213px] bg-gray-100 rounded-lg grid place-items-center overflow-hidden">
-                  <img src={`${CDN_BASE}/${uploadedKey}`} alt="Đã upload" className="w-full h-full object-cover" />
+                  <img
+                    src={`${CDN_BASE}/${uploadedKey}`}
+                    alt="Đã upload"
+                    className="w-full h-full object-cover"
+                  />
                 </div>
               )}
             </div>
@@ -488,7 +560,11 @@ export default function AdminCreateNovelPage() {
         >
           {submitting ? "Đang tạo…" : "Tạo truyện"}
         </button>
-        {msg && <span className={isErrorMessage ? "text-red-600" : "text-green-600"}>{msg}</span>}
+        {msg && (
+          <span className={isErrorMessage ? "text-red-600" : "text-green-600"}>
+            {msg}
+          </span>
+        )}
       </div>
     </main>
   );
@@ -567,9 +643,12 @@ function useSlugAvailability(input: string): SlugStatus {
       setStatus("checking");
       try {
         // Ưu tiên /novels/slug-exists?slug=... (đã có trong API)
-        const res = await fetch(apiUrl(`/novels/slug-exists?slug=${encodeURIComponent(slug)}`), {
-          cache: "no-store",
-        });
+        const res = await fetch(
+          apiUrl(`/novels/slug-exists?slug=${encodeURIComponent(slug)}`),
+          {
+            cache: "no-store",
+          }
+        );
         if (!res.ok) throw new Error("Slug check failed");
         const data = await res.json();
         if (!cancelled) {

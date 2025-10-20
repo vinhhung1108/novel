@@ -47,10 +47,7 @@ export default function AdminHeader() {
           <NavLink href="/novels/list">Truyện</NavLink>
           <NavLink href="/categories">🗂️ Thể loại</NavLink>
           <NavLink href="/tags">Tag</NavLink>
-          {/* Nếu đã có route, bạn mở thêm:
           <NavLink href="/authors">Tác giả</NavLink>
-          
-          */}
         </nav>
 
         <div className="ml-auto flex items-center gap-2">

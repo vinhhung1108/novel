@@ -49,6 +49,20 @@ type FormAction =
   | { type: "setMany"; values: Partial<FormState> }
   | { type: "toggleArr"; field: "categoryIds" | "tagIds"; value: string };
 
+type CreateNovelPayload = {
+  title: string;
+  slug: string;
+  description?: string;
+  cover_image_key?: string;
+  original_title?: string;
+  alt_titles?: string[];
+  language_code?: string;
+  is_featured: boolean;
+  mature: boolean;
+  priority: number;
+  author_id?: string;
+};
+
 type CropArea = { x: number; y: number; width: number; height: number };
 type SlugStatus =
   | "idle"
@@ -300,24 +314,7 @@ export default function AdminCreateNovelPage() {
         if (!keyToUse) return;
       }
 
-      const payload = {
-        title: form.title.trim(),
-        slug: form.slug.trim(),
-        description: form.description,
-        cover_image_key: keyToUse ?? undefined,
-
-        original_title: form.originalTitle.trim() || undefined,
-        alt_titles: form.altTitles
-          .split("\n")
-          .map((s) => s.trim())
-          .filter(Boolean),
-        language_code: form.languageCode.trim() || undefined,
-        is_featured: form.isFeatured,
-        mature: form.mature,
-        priority: Number.isFinite(form.priority) ? form.priority : 0,
-
-        author_id: form.authorId || undefined,
-      };
+      const payload = buildCreatePayload(form, keyToUse ?? null);
 
       // Tạo truyện
       const res = await fetch(apiUrl("/novels"), {
@@ -743,7 +740,7 @@ async function saveRelations(
   try {
     if (categoryIds.length) {
       await fetch(apiUrl(`/novels/${novelId}/categories`), {
-        method: "PUT",
+        method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeader() },
         body: JSON.stringify({ category_ids: categoryIds }),
       });
@@ -754,7 +751,7 @@ async function saveRelations(
   try {
     if (tagIds.length) {
       await fetch(apiUrl(`/novels/${novelId}/tags`), {
-        method: "PUT",
+        method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeader() },
         body: JSON.stringify({ tag_ids: tagIds }),
       });
@@ -871,6 +868,36 @@ function useDebouncedValue<T>(value: T, delay = 300) {
     return () => clearTimeout(h);
   }, [value, delay]);
   return debounced;
+}
+
+function buildCreatePayload(form: FormState, coverKey: string | null): CreateNovelPayload {
+  const altTitles = parseAltTitles(form.altTitles);
+  const language = form.languageCode.trim();
+  const original = form.originalTitle.trim();
+  const priority = Number.isFinite(form.priority) ? Math.max(0, form.priority) : 0;
+
+  const payload: CreateNovelPayload = {
+    title: form.title.trim(),
+    slug: form.slug.trim(),
+    description: form.description || undefined,
+    cover_image_key: coverKey ?? undefined,
+    original_title: original || undefined,
+    alt_titles: altTitles.length ? altTitles : undefined,
+    language_code: language || undefined,
+    is_featured: form.isFeatured,
+    mature: form.mature,
+    priority,
+    author_id: form.authorId || undefined,
+  };
+
+  return payload;
+}
+
+function parseAltTitles(input: string): string[] {
+  return input
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 function clsx(...classes: Array<string | false | null | undefined>) {

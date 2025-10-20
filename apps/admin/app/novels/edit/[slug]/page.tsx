@@ -1,7 +1,14 @@
 // apps/admin/app/novels/edit/[slug]/page.tsx
 "use client";
 
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useState,
+  type ChangeEvent,
+} from "react";
 import { useParams, useRouter } from "next/navigation";
 import Cropper from "react-easy-crop";
 import { useAuth } from "@/components/AuthProvider";
@@ -60,6 +67,20 @@ type FormState = {
 type FormAction =
   | { type: "set"; field: keyof FormState; value: any }
   | { type: "setMany"; values: Partial<FormState> };
+
+type UpdateNovelPayload = {
+  title: string;
+  slug: string;
+  description: string;
+  cover_image_key: string | null;
+  original_title: string | null;
+  alt_titles: string[];
+  language_code: string | null;
+  is_featured: boolean;
+  mature: boolean;
+  priority: number;
+  author_id: string | null;
+};
 
 type CropArea = { x: number; y: number; width: number; height: number };
 type SlugStatus =
@@ -163,7 +184,7 @@ export default function AdminEditNovelPage() {
             isFeatured: !!n.is_featured,
             mature: !!n.mature,
             priority: Number.isFinite(n.priority) ? n.priority : 0,
-            authorId: n.author_id || "",
+            authorId: n.author_id ?? "",
           },
         });
       } catch (e: any) {
@@ -226,7 +247,7 @@ export default function AdminEditNovelPage() {
 
   // chọn file
   const onPickFile = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
+    async (e: ChangeEvent<HTMLInputElement>) => {
       const f = e.target.files?.[0] || null;
       try {
         await pickFile(f);
@@ -323,24 +344,7 @@ export default function AdminEditNovelPage() {
         keyToUse = k;
       }
 
-      const payload: any = {
-        title: form.title.trim(),
-        slug: form.slug.trim(),
-        description: form.description,
-        cover_image_key: keyToUse ?? null,
-
-        original_title: form.originalTitle.trim() || null,
-        alt_titles: form.altTitles
-          .split("\n")
-          .map((s) => s.trim())
-          .filter(Boolean),
-        language_code: form.languageCode.trim() || null,
-        is_featured: !!form.isFeatured,
-        mature: !!form.mature,
-        priority: Number.isFinite(form.priority) ? form.priority : 0,
-
-        author_id: form.authorId || null,
-      };
+      const payload = buildUpdatePayload(form, keyToUse ?? null);
 
       const res = await fetch(apiUrl(`/novels/${novel.id}`), {
         method: "PATCH",
@@ -839,6 +843,37 @@ function useDebouncedValue<T>(value: T, delay = 300) {
     return () => clearTimeout(h);
   }, [value, delay]);
   return debounced;
+}
+
+function buildUpdatePayload(
+  form: FormState,
+  coverKey: string | null
+): UpdateNovelPayload {
+  const altTitles = parseAltTitles(form.altTitles);
+  const language = form.languageCode.trim();
+  const original = form.originalTitle.trim();
+  const priority = Number.isFinite(form.priority) ? Math.max(0, form.priority) : 0;
+
+  return {
+    title: form.title.trim(),
+    slug: form.slug.trim(),
+    description: form.description,
+    cover_image_key: coverKey,
+    original_title: original || null,
+    alt_titles: altTitles,
+    language_code: language ? language : null,
+    is_featured: form.isFeatured,
+    mature: form.mature,
+    priority,
+    author_id: form.authorId || null,
+  };
+}
+
+function parseAltTitles(input: string): string[] {
+  return input
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 function clsx(...classes: Array<string | false | null | undefined>) {

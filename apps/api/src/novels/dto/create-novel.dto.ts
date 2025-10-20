@@ -7,7 +7,6 @@ import {
   IsUUID,
   Min,
 } from "class-validator";
-import { Column } from "typeorm";
 
 export class CreateNovelDto {
   @IsString()
@@ -52,6 +51,8 @@ export class CreateNovelDto {
   @Min(0)
   priority?: number;
 
-  @Column("uuid", { name: "author_id", nullable: true })
-  author_id: string | null;
+  // liên kết tác giả (tuỳ chọn)
+  @IsOptional()
+  @IsUUID()
+  author_id?: string;
 }

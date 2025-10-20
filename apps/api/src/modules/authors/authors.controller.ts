@@ -9,6 +9,7 @@ import {
   Body,
   ParseUUIDPipe,
 } from "@nestjs/common";
+import type { Author } from "@/entities/author.entity";
 import { AuthorsService } from "./authors.service";
 
 @Controller("authors")
@@ -31,12 +32,15 @@ export class AuthorsController {
   }
 
   @Post()
-  create(@Body() body: any) {
+  create(@Body() body: Partial<Author>) {
     return this.svc.create(body);
   }
 
   @Patch(":id")
-  update(@Param("id", ParseUUIDPipe) id: string, @Body() body: any) {
+  update(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() body: Partial<Author>
+  ) {
     return this.svc.update(id, body);
   }
 

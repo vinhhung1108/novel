@@ -5,7 +5,7 @@ import {
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { DataSource, ILike, Repository } from "typeorm";
-import { Novel } from "../entities/novel.entity";
+import { Novel, NovelSource, NovelStatus } from "../entities/novel.entity";
 import { CreateNovelDto } from "./dto/create-novel.dto";
 import { QueryFailedError } from "typeorm";
 
@@ -22,6 +22,14 @@ function slugifySafe(input: string): string {
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
 }
+
+type UpdateNovelInput = Partial<
+  CreateNovelDto &
+    Pick<
+      Novel,
+      "status" | "source" | "source_url" | "author_id" | "published_at"
+    >
+>;
 
 @Injectable()
 export class NovelsService {
@@ -92,6 +100,7 @@ export class NovelsService {
         status: true,
         words_count: true,
         views: true,
+        author_id: true,
       },
       where,
       order: { [sort]: order as any, id: "ASC" },
@@ -139,8 +148,8 @@ export class NovelsService {
       slug: unique,
       description: data.description ?? "",
       cover_image_key: data.cover_image_key ?? null,
-      status: "ongoing" as any,
-      source: "local",
+      status: "ongoing" as NovelStatus,
+      source: "local" as NovelSource,
       source_url: null,
       author_id: null,
       rating_avg: 0,
@@ -171,7 +180,7 @@ export class NovelsService {
     }
   }
 
-  async update(id: string, data: Partial<CreateNovelDto>) {
+  async update(id: string, data: UpdateNovelInput) {
     const novel = await this.novels.findOne({ where: { id } });
     if (!novel) throw new NotFoundException("Novel not found");
 
@@ -182,17 +191,11 @@ export class NovelsService {
       patch.description = data.description;
     if (typeof data.cover_image_key === "string")
       patch.cover_image_key = data.cover_image_key;
-    if (typeof (data as any).status === "string")
-      patch.status = (data as any).status as any;
-
-    if (typeof (data as any).source === "string")
-      patch.source = (data as any).source;
-    if (typeof (data as any).source_url === "string")
-      patch.source_url = (data as any).source_url;
-    if (typeof (data as any).author_id === "string")
-      patch.author_id = (data as any).author_id;
-    if ((data as any).published_at !== undefined)
-      patch.published_at = (data as any).published_at as any;
+    if (data.status) patch.status = data.status;
+    if (data.source) patch.source = data.source;
+    if ("source_url" in data) patch.source_url = data.source_url ?? null;
+    if ("author_id" in data) patch.author_id = data.author_id ?? null;
+    if ("published_at" in data) patch.published_at = data.published_at ?? null;
 
     // update slug nếu gửi lên
     if (typeof data.slug === "string") {

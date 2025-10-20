@@ -4,18 +4,17 @@ import {
   IsInt,
   IsOptional,
   IsString,
-  MaxLength,
+  IsUUID,
   Min,
 } from "class-validator";
+import { Column } from "typeorm";
 
 export class CreateNovelDto {
   @IsString()
-  @MaxLength(200)
   title!: string;
 
   @IsOptional()
   @IsString()
-  @MaxLength(200)
   slug?: string;
 
   @IsOptional()
@@ -26,7 +25,7 @@ export class CreateNovelDto {
   @IsString()
   cover_image_key?: string | null;
 
-  // extra fields (đã migrate ở 108)
+  // mở rộng
   @IsOptional()
   @IsString()
   original_title?: string | null;
@@ -52,4 +51,7 @@ export class CreateNovelDto {
   @IsInt()
   @Min(0)
   priority?: number;
+
+  @Column("uuid", { name: "author_id", nullable: true })
+  author_id: string | null;
 }

@@ -10,6 +10,7 @@ import {
   ParseUUIDPipe,
   BadRequestException,
 } from "@nestjs/common";
+import type { Tag } from "@/entities/tag.entity";
 import { TagsService } from "./tags.service";
 
 @Controller("tags")
@@ -37,13 +38,16 @@ export class TagsController {
   // POST /v1/tags
   // body: { name, slug?, description? }
   @Post()
-  create(@Body() body: any) {
+  create(@Body() body: Partial<Tag>) {
     return this.svc.create(body);
   }
 
   // PATCH /v1/tags/:id
   @Patch(":id")
-  update(@Param("id", ParseUUIDPipe) id: string, @Body() body: any) {
+  update(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() body: Partial<Tag>
+  ) {
     return this.svc.update(id, body);
   }
 

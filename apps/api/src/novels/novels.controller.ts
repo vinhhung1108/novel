@@ -9,8 +9,12 @@ import {
   Body,
   ParseUUIDPipe,
 } from "@nestjs/common";
+import type { Novel } from "@/entities/novel.entity";
 import { NovelsService } from "./novels.service";
 import { CreateNovelDto } from "./dto/create-novel.dto";
+import { UpdateNovelDto } from "./dto/update-novel.dto";
+
+type UpdateNovelBody = UpdateNovelDto;
 
 @Controller("novels") // -> /v1/novels (vì main.ts đã setGlobalPrefix("v1"))
 export class NovelsController {
@@ -50,9 +54,9 @@ export class NovelsController {
   @Patch(":id")
   update(
     @Param("id", new ParseUUIDPipe()) id: string,
-    @Body() body: Partial<CreateNovelDto>
+    @Body() body: UpdateNovelBody
   ) {
-    return this.svc.update(id, body as any);
+    return this.svc.update(id, body);
   }
 
   @Delete(":id")

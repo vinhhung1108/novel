@@ -9,6 +9,7 @@ import {
   Body,
   ParseUUIDPipe,
 } from "@nestjs/common";
+import type { Category } from "@/entities/category.entity";
 import { CategoriesService } from "./categories.service";
 
 @Controller("categories")
@@ -25,12 +26,15 @@ export class CategoriesController {
   }
 
   @Post()
-  create(@Body() body: any) {
+  create(@Body() body: Partial<Category>) {
     return this.svc.create(body);
   }
 
   @Patch(":id")
-  update(@Param("id", ParseUUIDPipe) id: string, @Body() body: any) {
+  update(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() body: Partial<Category>
+  ) {
     return this.svc.update(id, body);
   }
 

@@ -11,6 +11,7 @@ import { Novel } from "@/entities/novel.entity";
 import { SearchService } from "@/search/search.service";
 import { slugifySafe } from "@/common/utils/slug";
 import { wordCountFromHtml } from "@/common/utils/text";
+import type { UpdateChapterDto } from "./dto/update-chapter.dto";
 
 @Injectable()
 export class ChaptersService {
@@ -144,7 +145,7 @@ export class ChaptersService {
   async patch(
     novel_id: string,
     index_no: number,
-    body: Partial<Chapter> & { content?: string }
+    body: UpdateChapterDto & { published_at?: Chapter["published_at"] }
   ) {
     const ch = await this.get(novel_id, index_no);
     if (!ch) throw new NotFoundException("Chapter not found");

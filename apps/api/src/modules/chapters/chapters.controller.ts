@@ -66,7 +66,7 @@ export class ChaptersController {
     @Param("index_no") index_no: string,
     @Body() body: UpdateChapterDto
   ) {
-    return this.svc.patch(novel_id, Number(index_no), body as any);
+    return this.svc.patch(novel_id, Number(index_no), body);
   }
 
   @Delete(":index_no")

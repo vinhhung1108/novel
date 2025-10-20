@@ -54,8 +54,8 @@ export class AuthorsService {
     if (!name) throw new BadRequestException("name is required");
 
     // Sinh slug từ body.slug (nếu có) hoặc từ name
-    const base = data.slug?.trim() || name;
-    let baseSlug = slugifySafe(base);
+    const baseInput = data.slug?.trim() ?? name;
+    const baseSlug = slugifySafe(baseInput);
     if (!baseSlug) throw new BadRequestException("Cannot generate slug");
 
     // Đảm bảo slug duy nhất

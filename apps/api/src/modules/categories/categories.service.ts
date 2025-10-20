@@ -44,9 +44,10 @@ export class CategoriesService {
   }
 
   async create(data: Partial<Category>) {
-    if (!data?.name?.trim()) throw new BadRequestException("name is required");
-    const base = data.slug?.trim() || data.name;
-    let baseSlug = slugifySafe(base!);
+    const name = data?.name?.trim();
+    if (!name) throw new BadRequestException("name is required");
+    const baseInput = data.slug?.trim() ?? name;
+    const baseSlug = slugifySafe(baseInput);
     if (!baseSlug) throw new BadRequestException("Cannot generate slug");
 
     // unique slug
@@ -61,7 +62,7 @@ export class CategoriesService {
     }
 
     const cat = await this.categories.save({
-      name: data.name!.trim(),
+      name,
       slug: unique,
       description: data.description ?? null,
     });

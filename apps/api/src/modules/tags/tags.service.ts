@@ -53,11 +53,12 @@ export class TagsService {
   }
 
   async create(data: Partial<Tag>) {
-    if (!data?.name?.trim()) {
+    const name = data?.name?.trim();
+    if (!name) {
       throw new BadRequestException("name is required");
     }
-    const base = data.slug?.trim() || data.name;
-    let baseSlug = slugifySafe(base!);
+    const baseInput = data.slug?.trim() ?? name;
+    const baseSlug = slugifySafe(baseInput);
     if (!baseSlug) throw new BadRequestException("Cannot generate slug");
 
     // unique slug
@@ -70,7 +71,7 @@ export class TagsService {
     }
 
     const tag = await this.tags.save({
-      name: data.name!.trim(),
+      name,
       slug: unique,
       description: data.description ?? null,
     });

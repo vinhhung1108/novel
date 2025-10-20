@@ -20,4 +20,4 @@ async function bootstrap() {
     `API listening on http://localhost:${process.env.API_PORT || 4000}`
   );
 }
-bootstrap();
+void bootstrap();

@@ -1,5 +1,6 @@
 import { DataSource } from "typeorm";
 import { slugifySafe } from "@/common/utils/slug";
+import { ensureCrawlSchema } from "./schema";
 
 type EntityManager = ReturnType<DataSource["createEntityManager"]>;
 
@@ -81,6 +82,7 @@ export async function upsertSeries(
   }
 ): Promise<{ seriesId: string }> {
   if (!p.url) throw new Error("Series URL is required");
+  await ensureCrawlSchema(ds);
   const em = ds.createEntityManager();
   const authorId = await ensureAuthor(em, p.authorName);
 
@@ -193,6 +195,7 @@ export async function upsertChapter(
   }
 ): Promise<{ chapterId: string }> {
   if (!p.extUrl) throw new Error("Chapter URL is required");
+  await ensureCrawlSchema(ds);
   const em = ds.createEntityManager();
 
   // 1) Tìm chapter qua mapping

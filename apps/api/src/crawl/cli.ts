@@ -27,7 +27,7 @@ async function main() {
     await q.seriesQueue.add(
       "series",
       { sourceId, extSeriesId, url },
-      { jobId: `series:${sourceId}:${extSeriesId}` }
+      { jobId: `series_${sourceId}:${extSeriesId}` }
     );
     console.log("enqueued series", extSeriesId);
   }
@@ -39,7 +39,7 @@ async function main() {
     await q.chapterQueue.add(
       "chapter",
       { sourceId, seriesId, extChapterId, url, indexNo },
-      { jobId: `chapter:${sourceId}:${extChapterId}` }
+      { jobId: `chapter_${sourceId}:${extChapterId}` }
     );
     console.log("enqueued chapter", extChapterId);
   }

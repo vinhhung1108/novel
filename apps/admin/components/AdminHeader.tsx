@@ -11,6 +11,7 @@ const navItems = [
   { href: "/categories", label: "Thể loại", icon: "🗂️" },
   { href: "/tags", label: "Tags", icon: "🏷️" },
   { href: "/authors", label: "Tác giả", icon: "✍️" },
+  { href: "/crawl", label: "Crawler", icon: "🕷️" },
 ];
 
 export default function AdminHeader() {

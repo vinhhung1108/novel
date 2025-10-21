@@ -11,6 +11,18 @@ import { DataSource } from "typeorm";
 import { normalizeHtmlToText } from "./normalize";
 import { upsertSeries, upsertChapter } from "./writers";
 
+const toInt = (v: string | undefined, d: number) =>
+  Number.isFinite(+(v ?? "")) ? +v! : d;
+const CRAWL_CONCURRENCY = toInt(process.env.CRAWL_CONCURRENCY, 2);
+const JITTER_MAX_MS = toInt(process.env.CRAWL_JITTER_MAX_MS, 400);
+function sleep(ms: number) {
+  return new Promise((res) => setTimeout(res, ms));
+}
+
+function jitter() {
+  return Math.floor(Math.random() * (JITTER_MAX_MS + 1));
+}
+
 @Injectable()
 export class CrawlWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CrawlWorker.name);
@@ -28,13 +40,15 @@ export class CrawlWorker implements OnModuleInit, OnModuleDestroy {
     };
 
     this.seriesWorker = new Worker(
-      "crawl:series",
+      "crawl-series",
       async (job) => {
         const { sourceId, extSeriesId, url } = job.data as {
           sourceId: string;
           extSeriesId: string;
           url: string;
         };
+
+        await sleep(jitter());
 
         const res = await request(url, {
           method: "GET",
@@ -89,7 +103,7 @@ export class CrawlWorker implements OnModuleInit, OnModuleDestroy {
     );
 
     this.chapterWorker = new Worker(
-      "crawl:chapter",
+      "crawl-chapter",
       async (job) => {
         const { sourceId, extChapterId, url, seriesId, indexNo } = job.data as {
           sourceId: string;
@@ -98,6 +112,8 @@ export class CrawlWorker implements OnModuleInit, OnModuleDestroy {
           seriesId: string;
           indexNo?: number;
         };
+
+        await sleep(jitter());
 
         const res = await request(url, {
           method: "GET",
@@ -132,17 +148,13 @@ export class CrawlWorker implements OnModuleInit, OnModuleDestroy {
     );
 
     // Optional: events log
-    this.seriesEvents = new QueueEvents("crawl:series", { connection });
-    this.seriesEvents.on(
-      "failed",
-      ({ jobId, failedReason }) =>
-        this.logger.warn(`series failed ${jobId} ${failedReason}`)
+    this.seriesEvents = new QueueEvents("crawl-series", { connection });
+    this.seriesEvents.on("failed", ({ jobId, failedReason }) =>
+      this.logger.warn(`series failed ${jobId} ${failedReason}`)
     );
-    this.chapterEvents = new QueueEvents("crawl:chapter", { connection });
-    this.chapterEvents.on(
-      "failed",
-      ({ jobId, failedReason }) =>
-        this.logger.warn(`chapter failed ${jobId} ${failedReason}`)
+    this.chapterEvents = new QueueEvents("crawl-chapter", { connection });
+    this.chapterEvents.on("failed", ({ jobId, failedReason }) =>
+      this.logger.warn(`chapter failed ${jobId} ${failedReason}`)
     );
   }
 

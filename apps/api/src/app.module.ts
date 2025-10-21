@@ -3,6 +3,7 @@ import { ThrottlerModule } from "@nestjs/throttler";
 import { APP_GUARD } from "@nestjs/core";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { ConfigModule } from "@nestjs/config";
+import { CrawlModule } from "./crawl/crawl.module";
 
 import { HealthController } from "./health.controller";
 import {
@@ -62,6 +63,7 @@ import { CategoriesModule } from "./modules/categories/categories.module";
     ChaptersModule,
     StatsModule,
     CategoriesModule,
+    CrawlModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -2,9 +2,11 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  Logger,
+  OnModuleInit,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { DataSource, ILike, Repository } from "typeorm";
+import { DataSource, Repository } from "typeorm";
 import { Novel } from "../entities/novel.entity";
 import { StorageService } from "@/upload/storage.service";
 import { CreateNovelDto } from "./dto/create-novel.dto";
@@ -26,11 +28,29 @@ function slugifySafe(input: string): string {
 
 type UpdateNovelInput = Partial<CreateNovelDto>;
 
+interface SummarySource {
+  id: string;
+  title: string;
+  slug: string;
+  description?: string | null;
+  cover_image_key?: string | null;
+  status?: string | null;
+  words_count?: string | number;
+  views?: string | number;
+  author_id?: string | null;
+  updated_at: Date;
+}
+
+interface DetailSource extends SummarySource {
+  category_ids?: string[];
+  tag_ids?: string[];
+}
+
 export interface NovelListItem {
   id: string;
   title: string;
   slug: string;
-  description: string;
+  description: string | null;
   cover_image_key: string | null;
   updated_at: Date;
   status: string | null;
@@ -44,14 +64,44 @@ export interface NovelWithRelations extends Novel {
   tag_ids: string[];
 }
 
+export interface NovelSummaryResponse {
+  id: string;
+  title: string;
+  slug: string;
+  description: string | null;
+  cover_image_key: string | null;
+  status: string | null;
+  words_count: string | number;
+  views: string | number;
+  author_id: string | null;
+  updated_at: string;
+}
+
+export interface NovelDetailResponse extends NovelSummaryResponse {
+  category_ids: string[];
+  tag_ids: string[];
+}
+
+export interface NovelListResponse {
+  items: NovelSummaryResponse[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 @Injectable()
-export class NovelsService {
+export class NovelsService implements OnModuleInit {
+  private readonly logger = new Logger(NovelsService.name);
   constructor(
     @InjectRepository(Novel)
     private readonly novels: Repository<Novel>,
     private readonly db: DataSource,
     private readonly storage: StorageService
   ) {}
+
+  async onModuleInit() {
+    await this.ensureIndexes();
+  }
 
   async replaceNovelCategories(
     novel_id: string,
@@ -103,46 +153,53 @@ export class NovelsService {
     page = 1,
     limit = 12,
     opts?: { q?: string; sort?: "updated_at" | "title"; order?: "ASC" | "DESC" }
-  ): Promise<{ items: NovelListItem[]; total: number; page: number; limit: number }> {
+  ): Promise<NovelListResponse> {
     const safePage = Number.isInteger(page) && page > 0 ? page : 1;
     const safeLimit = Number.isInteger(limit)
       ? Math.min(Math.max(limit, 1), 48)
       : 12;
-    const q = opts?.q?.trim();
     const sort = opts?.sort === "title" ? "title" : "updated_at";
     const order: "ASC" | "DESC" = opts?.order === "ASC" ? "ASC" : "DESC";
+    const keyword = opts?.q?.trim().toLowerCase();
 
-    const where = q
-      ? [{ title: ILike(`%${q}%`) }, { slug: ILike(`%${q}%`) }]
-      : undefined;
+    const qb = this.novels
+      .createQueryBuilder("novel")
+      .select([
+        "novel.id",
+        "novel.title",
+        "novel.slug",
+        "novel.description",
+        "novel.cover_image_key",
+        "novel.updated_at",
+        "novel.status",
+        "novel.words_count",
+        "novel.views",
+        "novel.author_id",
+      ])
+      .orderBy(`novel.${sort}`, order)
+      .addOrderBy("novel.id", "ASC")
+      .skip((safePage - 1) * safeLimit)
+      .take(safeLimit);
 
-    const [items, total] = await this.novels.findAndCount({
-      select: {
-        id: true,
-        title: true,
-        slug: true,
-        description: true,
-        cover_image_key: true,
-        updated_at: true,
-        status: true,
-        words_count: true,
-        views: true,
-        author_id: true,
-      },
-      where,
-      order: { [sort]: order, id: "ASC" },
-      skip: (safePage - 1) * safeLimit,
-      take: safeLimit,
-    });
+    if (keyword) {
+      qb.where(
+        "LOWER(novel.title) LIKE :kw OR LOWER(novel.slug) LIKE :kw",
+        { kw: `%${keyword}%` }
+      );
+    }
+
+    const [items, total] = await qb.getManyAndCount();
     return {
-      items: items as NovelListItem[],
+      items: items.map((item) =>
+        this.mapToSummary(item as SummarySource)
+      ),
       total,
       page: safePage,
       limit: safeLimit,
     };
   }
 
-  async getBySlug(slug: string): Promise<NovelWithRelations | null> {
+  async getBySlug(slug: string): Promise<NovelDetailResponse | null> {
     const novel = await this.novels.findOne({ where: { slug } });
     if (!novel) return null;
 
@@ -156,11 +213,20 @@ export class NovelsService {
       [novel.id]
     );
 
-    return {
-      ...novel,
+    return this.mapToDetail({
+      id: novel.id,
+      title: novel.title,
+      slug: novel.slug,
+      description: novel.description,
+      cover_image_key: novel.cover_image_key,
+      status: novel.status,
+      words_count: novel.words_count,
+      views: novel.views,
+      author_id: novel.author_id,
+      updated_at: novel.updated_at,
       category_ids: categoryRows.map((row) => row.category_id),
       tag_ids: tagRows.map((row) => row.tag_id),
-    };
+    });
   }
 
   async slugExists(slug: string) {
@@ -172,7 +238,7 @@ export class NovelsService {
     return { exists: !!found, valid: true };
   }
 
-  async create(data: CreateNovelDto): Promise<Novel> {
+  async create(data: CreateNovelDto): Promise<NovelDetailResponse> {
     if (!data?.title?.trim()) {
       throw new BadRequestException("Title is required");
     }
@@ -216,7 +282,23 @@ export class NovelsService {
     };
 
     try {
-      return await this.novels.save(entity);
+      const saved = await this.novels.save(entity);
+      const detail = await this.getBySlug(saved.slug);
+      if (detail) return detail;
+      return this.mapToDetail({
+        id: saved.id,
+        title: saved.title,
+        slug: saved.slug,
+        description: saved.description,
+        cover_image_key: saved.cover_image_key,
+        status: saved.status,
+        words_count: saved.words_count,
+        views: saved.views,
+        author_id: saved.author_id,
+        updated_at: saved.updated_at,
+        category_ids: [],
+        tag_ids: [],
+      });
     } catch (e) {
       // Convert lỗi DB → 400 dễ hiểu
       if (e instanceof QueryFailedError) {
@@ -229,7 +311,7 @@ export class NovelsService {
     }
   }
 
-  async update(id: string, data: UpdateNovelInput): Promise<Novel | null> {
+  async update(id: string, data: UpdateNovelInput): Promise<NovelDetailResponse | null> {
     const novel = await this.novels.findOne({ where: { id } });
     if (!novel) throw new NotFoundException("Novel not found");
 
@@ -278,7 +360,8 @@ export class NovelsService {
     }
 
     await this.novels.update({ id }, patch);
-    return this.novels.findOne({ where: { id } });
+    const nextSlug = patch.slug ?? novel.slug;
+    return this.getBySlug(nextSlug);
   }
 
   async remove(id: string): Promise<{ ok: true }> {
@@ -302,6 +385,85 @@ export class NovelsService {
     });
     await this.storage.deleteObject(novel.cover_image_key);
     return { ok: true };
+  }
+
+  private async ensureIndexes() {
+    await this.runIndex(
+      "CREATE INDEX IF NOT EXISTS idx_novels_title_lower ON public.novels (LOWER(title))",
+      "idx_novels_title_lower"
+    );
+    await this.runIndex(
+      "CREATE INDEX IF NOT EXISTS idx_novels_slug_lower ON public.novels (LOWER(slug))",
+      "idx_novels_slug_lower"
+    );
+    await this.runIndex(
+      "CREATE INDEX IF NOT EXISTS idx_novel_categories_novel ON public.novel_categories (novel_id)",
+      "idx_novel_categories_novel"
+    );
+    await this.runIndex(
+      "CREATE INDEX IF NOT EXISTS idx_novel_tags_novel ON public.novel_tags (novel_id)",
+      "idx_novel_tags_novel"
+    );
+    await this.runIndex(
+      "CREATE INDEX IF NOT EXISTS idx_chapters_novel ON public.chapters (novel_id)",
+      "idx_chapters_novel"
+    );
+    await this.runIndex(
+      "CREATE INDEX IF NOT EXISTS idx_novel_views_date ON public.novel_views (view_date, novel_id)",
+      "idx_novel_views_date",
+      true
+    );
+  }
+
+  private async runIndex(sql: string, label: string, optional = false) {
+    try {
+      await this.db.query(sql);
+    } catch (error) {
+      let message: string;
+      if (error instanceof Error) message = error.message;
+      else if (typeof error === "string") message = error;
+      else message = JSON.stringify(error ?? "unknown");
+      if (optional) {
+        this.logger.debug(`Skip optional index ${label}: ${message}`);
+      } else {
+        this.logger.warn(`Cannot ensure index ${label}: ${message}`);
+      }
+    }
+  }
+
+  private mapToSummary(novel: SummarySource): NovelSummaryResponse {
+    return {
+      id: novel.id,
+      title: novel.title,
+      slug: novel.slug,
+      description: novel.description ?? null,
+      cover_image_key: novel.cover_image_key ?? null,
+      status: novel.status ?? null,
+      words_count: this.normalizeNumeric(novel.words_count),
+      views: this.normalizeNumeric(novel.views),
+      author_id: novel.author_id ?? null,
+      updated_at:
+        novel.updated_at instanceof Date
+          ? novel.updated_at.toISOString()
+          : new Date(novel.updated_at).toISOString(),
+    };
+  }
+
+  private mapToDetail(novel: DetailSource): NovelDetailResponse {
+    const summary = this.mapToSummary(novel);
+    return {
+      ...summary,
+      category_ids: Array.isArray(novel.category_ids)
+        ? novel.category_ids
+        : [],
+      tag_ids: Array.isArray(novel.tag_ids) ? novel.tag_ids : [],
+    };
+  }
+
+  private normalizeNumeric(value?: string | number | null): string | number {
+    if (typeof value === "number") return value;
+    if (value === null || value === undefined) return "0";
+    return value;
   }
 }
 

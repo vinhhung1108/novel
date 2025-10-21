@@ -1,8 +1,14 @@
 import { Module } from "@nestjs/common";
+import { ThrottlerModule } from "@nestjs/throttler";
+import { APP_GUARD } from "@nestjs/core";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { ConfigModule } from "@nestjs/config";
 
 import { HealthController } from "./health.controller";
+import {
+  AppThrottlerGuard,
+  ThrottlerConfigService,
+} from "./guards/rate-limit.guard";
 
 // Entities “hệ thống” (user/role)
 import { User } from "./entities/user.entity";
@@ -25,6 +31,10 @@ import { CategoriesModule } from "./modules/categories/categories.module";
   imports: [
     // Config
     ConfigModule.forRoot({ isGlobal: true }),
+
+    ThrottlerModule.forRootAsync({
+      useClass: ThrottlerConfigService,
+    }),
 
     // TypeORM
     TypeOrmModule.forRoot({
@@ -54,6 +64,12 @@ import { CategoriesModule } from "./modules/categories/categories.module";
     CategoriesModule,
   ],
   controllers: [HealthController],
-  providers: [],
+  providers: [
+    ThrottlerConfigService,
+    {
+      provide: APP_GUARD,
+      useClass: AppThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}

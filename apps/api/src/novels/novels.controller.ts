@@ -1,13 +1,16 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Param,
-  Query,
   Body,
+  Controller,
+  DefaultValuePipe,
+  Delete,
+  Get,
+  Param,
+  ParseIntPipe,
   ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
 } from "@nestjs/common";
 import { NovelsService } from "./novels.service";
 import { CreateNovelDto } from "./dto/create-novel.dto";
@@ -21,13 +24,23 @@ export class NovelsController {
 
   @Get()
   list(
-    @Query("page") page = "1",
-    @Query("limit") limit = "12",
+    @Query("page", new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query("limit", new DefaultValuePipe(12), ParseIntPipe) limit: number,
     @Query("q") q?: string,
-    @Query("sort") sort: "updated_at" | "title" = "updated_at",
-    @Query("order") order: "ASC" | "DESC" = "DESC"
+    @Query("sort", new DefaultValuePipe("updated_at"))
+    sort?: "updated_at" | "title",
+    @Query("order", new DefaultValuePipe("DESC")) order?: string
   ) {
-    return this.svc.list(Number(page), Number(limit), { q, sort, order });
+    const normalizedOrder =
+      typeof order === "string" && order.toUpperCase() === "ASC"
+        ? "ASC"
+        : "DESC";
+    const normalizedSort = sort === "title" ? "title" : "updated_at";
+    return this.svc.list(page, limit, {
+      q: q?.trim() || undefined,
+      sort: normalizedSort,
+      order: normalizedOrder,
+    });
   }
 
   @Get("slug-exists/:slug")
@@ -65,7 +78,7 @@ export class NovelsController {
 
   @Post(":id/categories")
   async setCategories(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
     @Body() body: { category_ids: string[] }
   ) {
     await this.svc.replaceNovelCategories(
@@ -77,7 +90,7 @@ export class NovelsController {
 
   @Post(":id/tags")
   async setTags(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
     @Body() body: { tag_ids: string[] }
   ) {
     await this.svc.replaceNovelTags(

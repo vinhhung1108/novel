@@ -12,8 +12,8 @@ type Props = {
 
 export function NovelCard({ novel, onEdit, onManageChapters, onDelete }: Props) {
   return (
-    <article className="flex h-full flex-col rounded-2xl border border-zinc-200 bg-white shadow-sm transition hover:border-zinc-300">
-      <div className="relative h-48 overflow-hidden rounded-t-2xl bg-zinc-100">
+    <article className="flex h-full flex-col rounded-xl border border-zinc-200 bg-white shadow-sm transition hover:shadow-md">
+      <div className="relative h-36 overflow-hidden rounded-t-xl bg-zinc-100">
         {novel.cover_image_key ? (
           <img
             src={`${CDN_BASE}/${novel.cover_image_key}`}
@@ -34,17 +34,11 @@ export function NovelCard({ novel, onEdit, onManageChapters, onDelete }: Props) 
 
       <div className="flex flex-1 flex-col gap-3 p-4">
         <div className="min-w-0">
-          <h2 className="truncate text-lg font-semibold text-zinc-900">
+          <h2 className="truncate text-base font-semibold text-zinc-900">
             {novel.title}
           </h2>
           <p className="truncate text-xs text-zinc-500">/{novel.slug}</p>
         </div>
-
-        {novel.description ? (
-          <p className="line-clamp-3 text-sm text-zinc-600">
-            {novel.description}
-          </p>
-        ) : null}
 
         <div className="mt-auto space-y-1 text-xs text-zinc-500">
           {novel.words_count ? (
@@ -57,22 +51,22 @@ export function NovelCard({ novel, onEdit, onManageChapters, onDelete }: Props) 
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 pt-2">
+        <div className="flex flex-wrap gap-2 pt-2 text-xs">
           <button
             onClick={() => onEdit(novel)}
-            className="inline-flex flex-1 items-center justify-center rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100"
+            className="inline-flex flex-1 items-center justify-center rounded-lg border border-zinc-300 px-2 py-2 font-medium text-zinc-700 transition hover:bg-zinc-100"
           >
             ✏️ Sửa
           </button>
           <button
             onClick={() => onManageChapters(novel)}
-            className="inline-flex flex-1 items-center justify-center rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100"
+            className="inline-flex flex-1 items-center justify-center rounded-lg border border-zinc-300 px-2 py-2 font-medium text-zinc-700 transition hover:bg-zinc-100"
           >
             📖 Chương
           </button>
           <button
             onClick={() => onDelete(novel)}
-            className="inline-flex flex-1 items-center justify-center rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+            className="inline-flex flex-1 items-center justify-center rounded-lg border border-red-200 px-2 py-2 font-medium text-red-600 transition hover:bg-red-50"
           >
             🗑️ Xoá
           </button>

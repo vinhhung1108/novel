@@ -26,6 +26,24 @@ function slugifySafe(input: string): string {
 
 type UpdateNovelInput = Partial<CreateNovelDto>;
 
+export interface NovelListItem {
+  id: string;
+  title: string;
+  slug: string;
+  description: string;
+  cover_image_key: string | null;
+  updated_at: Date;
+  status: string | null;
+  words_count: string | number;
+  views: string | number;
+  author_id: string | null;
+}
+
+export interface NovelWithRelations extends Novel {
+  category_ids: string[];
+  tag_ids: string[];
+}
+
 @Injectable()
 export class NovelsService {
   constructor(
@@ -35,7 +53,10 @@ export class NovelsService {
     private readonly storage: StorageService
   ) {}
 
-  async replaceNovelCategories(novel_id: string, category_ids: string[]) {
+  async replaceNovelCategories(
+    novel_id: string,
+    category_ids: string[]
+  ): Promise<{ ok: true }> {
     // xác nhận novel tồn tại
     const novel = await this.novels.findOne({ where: { id: novel_id } });
     if (!novel) throw new NotFoundException("Novel not found");
@@ -57,7 +78,10 @@ export class NovelsService {
     return { ok: true };
   }
 
-  async replaceNovelTags(novel_id: string, tag_ids: string[]) {
+  async replaceNovelTags(
+    novel_id: string,
+    tag_ids: string[]
+  ): Promise<{ ok: true }> {
     // Bảng nối tags của bạn đang dùng là gì? (trước đây có NovelTag entity).
     // Ví dụ join-table tên public.novel_tags(novel_id, tag_id):
     await this.db.transaction(async (trx) => {
@@ -79,8 +103,15 @@ export class NovelsService {
     page = 1,
     limit = 12,
     opts?: { q?: string; sort?: "updated_at" | "title"; order?: "ASC" | "DESC" }
-  ) {
-    const { q, sort = "updated_at", order = "DESC" } = opts || {};
+  ): Promise<{ items: NovelListItem[]; total: number; page: number; limit: number }> {
+    const safePage = Number.isInteger(page) && page > 0 ? page : 1;
+    const safeLimit = Number.isInteger(limit)
+      ? Math.min(Math.max(limit, 1), 48)
+      : 12;
+    const q = opts?.q?.trim();
+    const sort = opts?.sort === "title" ? "title" : "updated_at";
+    const order: "ASC" | "DESC" = opts?.order === "ASC" ? "ASC" : "DESC";
+
     const where = q
       ? [{ title: ILike(`%${q}%`) }, { slug: ILike(`%${q}%`) }]
       : undefined;
@@ -99,14 +130,19 @@ export class NovelsService {
         author_id: true,
       },
       where,
-      order: { [sort]: order as any, id: "ASC" },
-      skip: (page - 1) * limit,
-      take: limit,
+      order: { [sort]: order, id: "ASC" },
+      skip: (safePage - 1) * safeLimit,
+      take: safeLimit,
     });
-    return { items, total, page, limit };
+    return {
+      items: items as NovelListItem[],
+      total,
+      page: safePage,
+      limit: safeLimit,
+    };
   }
 
-  async getBySlug(slug: string) {
+  async getBySlug(slug: string): Promise<NovelWithRelations | null> {
     const novel = await this.novels.findOne({ where: { slug } });
     if (!novel) return null;
 
@@ -136,7 +172,7 @@ export class NovelsService {
     return { exists: !!found, valid: true };
   }
 
-  async create(data: CreateNovelDto) {
+  async create(data: CreateNovelDto): Promise<Novel> {
     if (!data?.title?.trim()) {
       throw new BadRequestException("Title is required");
     }
@@ -169,7 +205,7 @@ export class NovelsService {
       rating_count: 0,
       words_count: "0",
       views: "0",
-      published_at: data.published_at ? new Date(data.published_at) : null,
+      published_at: parseDateInput(data.published_at),
 
       original_title: data.original_title ?? null,
       alt_titles: Array.isArray(data.alt_titles) ? data.alt_titles : null,
@@ -193,7 +229,7 @@ export class NovelsService {
     }
   }
 
-  async update(id: string, data: UpdateNovelInput) {
+  async update(id: string, data: UpdateNovelInput): Promise<Novel | null> {
     const novel = await this.novels.findOne({ where: { id } });
     if (!novel) throw new NotFoundException("Novel not found");
 
@@ -209,9 +245,7 @@ export class NovelsService {
     if ("source_url" in data) patch.source_url = data.source_url ?? null;
     if ("author_id" in data) patch.author_id = data.author_id ?? null;
     if ("published_at" in data)
-      patch.published_at = data.published_at
-        ? new Date(data.published_at)
-        : null;
+      patch.published_at = parseDateInput(data.published_at);
 
     // update slug nếu gửi lên
     if (typeof data.slug === "string") {
@@ -247,13 +281,33 @@ export class NovelsService {
     return this.novels.findOne({ where: { id } });
   }
 
-  async remove(id: string) {
+  async remove(id: string): Promise<{ ok: true }> {
     const novel = await this.novels.findOne({ where: { id } });
     if (!novel) throw new NotFoundException("Novel not found");
-    if (novel.cover_image_key) {
-      await this.storage.deleteObject(novel.cover_image_key);
-    }
-    await this.novels.delete({ id });
+    await this.db.transaction(async (trx) => {
+      await trx.query(
+        `DELETE FROM public.chapter_bodies WHERE novel_id = $1`,
+        [id]
+      );
+      await trx.query(`DELETE FROM public.chapters WHERE novel_id = $1`, [id]);
+      await trx.query(
+        `DELETE FROM public.novel_categories WHERE novel_id = $1`,
+        [id]
+      );
+      await trx.query(
+        `DELETE FROM public.novel_tags WHERE novel_id = $1`,
+        [id]
+      );
+      await trx.getRepository(Novel).delete({ id });
+    });
+    await this.storage.deleteObject(novel.cover_image_key);
     return { ok: true };
   }
+}
+
+function parseDateInput(input?: string | Date | null): Date | null {
+  if (!input) return null;
+  if (input instanceof Date) return input;
+  const timestamp = Date.parse(input);
+  return Number.isNaN(timestamp) ? null : new Date(timestamp);
 }

@@ -251,15 +251,15 @@ export class CrawlController {
         url: dto.url,
       },
       {
-        jobId: `series_${dto.sourceId}:${dto.extSeriesId}`,
-        removeOnComplete: 1000,
-        removeOnFail: 5000,
+        jobId: `series_${dto.sourceId}_${dto.extSeriesId}`,
+        removeOnComplete: true,
+        removeOnFail: true,
       }
     );
 
     return {
       ok: true,
-      jobId: `series_${dto.sourceId}:${dto.extSeriesId}`,
+      jobId: `series_${dto.sourceId}_${dto.extSeriesId}`,
     };
   }
 
@@ -277,14 +277,14 @@ export class CrawlController {
         indexNo: dto.indexNo,
       },
       {
-        jobId: `chapter_${dto.sourceId}:${dto.extChapterId}`,
-        removeOnComplete: 1000,
-        removeOnFail: 5000,
+        jobId: `chapter_${dto.sourceId}_${dto.extChapterId}`,
+        removeOnComplete: true,
+        removeOnFail: true,
       }
     );
     return {
       ok: true,
-      jobId: `chapter_${dto.sourceId}:${dto.extChapterId}`,
+      jobId: `chapter_${dto.sourceId}_${dto.extChapterId}`,
     };
   }
 

@@ -145,7 +145,9 @@ export async function upsertSeries(
       `
       INSERT INTO series_source_map(source_id, ext_series_id, series_id, ext_url)
       VALUES($1, $2, $3, $4)
-      ON CONFLICT (source_id, ext_series_id) DO NOTHING
+      ON CONFLICT (source_id, ext_series_id) DO UPDATE SET
+        series_id = EXCLUDED.series_id,
+        ext_url   = EXCLUDED.ext_url
     `,
       [p.sourceId, p.extSeriesId, seriesId, p.url || ""]
     );

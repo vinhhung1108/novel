@@ -18,7 +18,7 @@ type Chapter = {
   novel_id: string;
   index_no: number;
   title: string;
-  content?: string | null;
+  contentHtml: string;
   updated_at: string;
 };
 
@@ -44,7 +44,34 @@ async function getChapter(
       { cache: "no-store" }
     );
     if (!res.ok) return null;
-    return (await res.json()) as Chapter;
+    const data = (await res.json()) as
+      | {
+          chapter: {
+            id: string;
+            novel_id: string;
+            index_no: number;
+            title: string;
+            updated_at: string;
+          };
+          body?: { content_html?: string | null; updated_at?: string };
+        }
+      | null;
+    if (!data || !data.chapter) return null;
+
+    const contentHtml =
+      data.body?.content_html ??
+      // fallback: một số API cũ trả trực tiếp trường content
+      (data as unknown as { content?: string })?.content ??
+      "<p>(Chưa có nội dung)</p>";
+
+    return {
+      id: data.chapter.id,
+      novel_id: data.chapter.novel_id,
+      index_no: data.chapter.index_no,
+      title: data.chapter.title,
+      updated_at: data.chapter.updated_at,
+      contentHtml,
+    };
   } catch {
     return null;
   }
@@ -149,7 +176,7 @@ export default async function ChapterPage({
             lineHeight: 1.75,
           }}
           dangerouslySetInnerHTML={{
-            __html: chapter.content || "<p>(Chưa có nội dung)</p>",
+            __html: chapter.contentHtml,
           }}
         />
       ) : (

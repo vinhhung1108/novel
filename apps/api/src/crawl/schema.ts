@@ -37,11 +37,15 @@ export async function ensureCrawlSchema(ds: DataSource): Promise<void> {
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           source_id UUID NOT NULL REFERENCES source(id) ON DELETE CASCADE,
           ext_chapter_id TEXT NOT NULL,
-          chapter_id UUID NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+          chapter_id UUID NOT NULL,
           ext_url TEXT NOT NULL,
           created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
           UNIQUE (source_id, ext_chapter_id)
         )
+      `);
+      await ds.query(`
+        CREATE INDEX IF NOT EXISTS idx_chapter_source_map_chapter
+          ON chapter_source_map(chapter_id)
       `);
     })().catch((err) => {
       ensurePromise = null;

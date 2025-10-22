@@ -79,6 +79,7 @@ export async function upsertSeries(
     sourceId: string;
     extSeriesId: string;
     url: string;
+    description?: string | null;
   }
 ): Promise<{ seriesId: string }> {
   if (!p.url) throw new Error("Series URL is required");
@@ -174,6 +175,10 @@ export async function upsertSeries(
     `,
       [p.sourceId, p.extSeriesId, seriesId, p.url || ""]
     );
+  }
+
+  if (p.description) {
+    await em.query(`UPDATE novels SET description=$1 WHERE id=$2`, [p.description, seriesId]);
   }
 
   return { seriesId: seriesId! };

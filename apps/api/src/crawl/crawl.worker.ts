@@ -127,6 +127,131 @@ function extractSeriesMeta(
   return null;
 }
 
+function extractBuildId(html: string): string | null {
+  const patterns = [
+    /"buildId":"([a-zA-Z0-9-_]+)"/,
+    /\"buildId\":\"([a-zA-Z0-9-_]+)\"/,
+    /\"b\":\"([a-zA-Z0-9-_]+)\"/,
+  ];
+  for (const re of patterns) {
+    const match = re.exec(html);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+async function fetchNextData(
+  origin: string,
+  buildId: string,
+  path: string
+): Promise<any | null> {
+  const safePath = path.replace(/^\/+/, "");
+  const url = `${origin}/_next/data/${buildId}/${safePath}.json`;
+  try {
+    const res = await request(url, {
+      method: "GET",
+      headers: { "User-Agent": "NovelBot/1.0 (+contact@example.com)" },
+    });
+    if (res.statusCode >= 400) return null;
+    const text = await res.body.text();
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function unwrapPageProps(data: any): any {
+  if (!data || typeof data !== "object") return null;
+  if (data.pageProps) return data.pageProps;
+  if (data.props?.pageProps) return data.props.pageProps;
+  if (data.data?.pageProps) return data.data.pageProps;
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      const nested = unwrapPageProps(item);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+function deepFind(
+  root: any,
+  predicate: (value: any, key?: string) => boolean,
+  visited = new Set<any>()
+): any {
+  if (!root || typeof root !== "object") return null;
+  if (visited.has(root)) return null;
+  visited.add(root);
+
+  if (Array.isArray(root)) {
+    for (const item of root) {
+      const found = deepFind(item, predicate, visited);
+      if (found !== null && found !== undefined) return found;
+    }
+    return null;
+  }
+
+  for (const [key, value] of Object.entries(root)) {
+    if (predicate(value, key)) return value;
+  }
+
+  for (const value of Object.values(root)) {
+    if (typeof value === "object" && value) {
+      const found = deepFind(value, predicate, visited);
+      if (found !== null && found !== undefined) return found;
+    }
+  }
+  return null;
+}
+
+function looksLikeStoryDetail(obj: any): boolean {
+  if (!obj || typeof obj !== "object") return false;
+  const keys = Object.keys(obj);
+  return (
+    keys.includes("name") &&
+    keys.includes("slug") &&
+    (keys.includes("description") || keys.some((k) => /author/i.test(k)))
+  );
+}
+
+function looksLikeChapterNode(obj: any): boolean {
+  if (!obj || typeof obj !== "object") return false;
+  const keys = Object.keys(obj);
+  if (keys.includes("chapter") || keys.includes("chapterNumber")) return true;
+  if (keys.includes("slug") && /chuong|chapter/i.test(String(obj.slug))) return true;
+  if (keys.includes("chapter_slug")) return true;
+  if (keys.includes("link") && /chuong|chapter/i.test(String(obj.link))) return true;
+  return false;
+}
+
+function findChaptersArray(root: any): any[] | null {
+  const found = deepFind(
+    root,
+    (value) => Array.isArray(value) && value.some((item) => looksLikeChapterNode(item))
+  );
+  return Array.isArray(found) ? found : null;
+}
+
+function findChapterDetail(root: any): any {
+  return deepFind(root, (value, key) => {
+    if (!value || typeof value !== "object") return false;
+    if (key === "chapterDetail" || key === "chapter") return true;
+    const keys = Object.keys(value);
+    return keys.some((k) =>
+      ["chapterContent", "chapter_content", "content", "content_html"].includes(k)
+    );
+  });
+}
+
+function findRichContent(root: any): string | null {
+  const found = deepFind(root, (value) => {
+    if (typeof value !== "string") return false;
+    const trimmed = value.trim();
+    return trimmed.length > 40 && /<p|<div|<br/iu.test(trimmed);
+  });
+  return typeof found === "string" ? found : null;
+}
+
 @Injectable()
 export class CrawlWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CrawlWorker.name);
@@ -165,15 +290,41 @@ export class CrawlWorker implements OnModuleInit, OnModuleDestroy {
           throw new Error(`Series fetch ${url} failed ${res.statusCode}`);
         const html = await res.body.text();
         const $ = loadHtml(html);
+        const origin = new URL(url).origin;
+        const buildId = extractBuildId(html);
+        const seriesMeta = extractSeriesMeta($);
+        const slugPath =
+          seriesMeta?.slug ?? new URL(url).pathname.replace(/^\/+|\/+$/g, "");
+
+        let nextData: any | null = null;
+        if (buildId && slugPath) {
+          nextData = await fetchNextData(origin, buildId, slugPath);
+        }
+        const pageProps = unwrapPageProps(nextData);
+        const storyDetail = pageProps && deepFind(pageProps, looksLikeStoryDetail);
+        const chaptersFromData = pageProps ? findChaptersArray(pageProps) : null;
 
         // Parser tuỳ nguồn: ví dụ
-        const title = $("h1").first().text().trim();
+        const title =
+          storyDetail?.name ||
+          storyDetail?.title ||
+          $("h1").first().text().trim();
         const authorName =
+          storyDetail?.authorName ||
+          storyDetail?.author_name ||
+          storyDetail?.author?.name ||
           $('a[rel="author"]').first().text().trim() ||
           $(".author").first().text().trim();
         const coverUrl =
-          $("img.cover").attr("src") ??
+          storyDetail?.thumbnail ||
+          storyDetail?.image ||
+          storyDetail?.poster ||
+          $("img.cover").attr("src") ||
           $("meta[property='og:image']").attr("content");
+        const description =
+          storyDetail?.description ||
+          storyDetail?.desc ||
+          $("#gioi-thieu-truyen p").text().trim();
 
         const { seriesId } = await upsertSeries(this.ds, {
           title,
@@ -182,9 +333,8 @@ export class CrawlWorker implements OnModuleInit, OnModuleDestroy {
           sourceId,
           extSeriesId,
           url,
+          description,
         });
-
-        const meta = extractSeriesMeta($);
 
         // Lấy danh sách chương
         const rawLinks = collectChapterLinks($);
@@ -200,19 +350,63 @@ export class CrawlWorker implements OnModuleInit, OnModuleDestroy {
           try {
             const abs = new URL(link.href, url);
             const extChapterId = abs.pathname + abs.search;
-            const title = link.text?.trim();
+            const titleText = link.text?.trim();
             const idxFromText =
-              guessIndex(title ?? "", abs.pathname) ?? idx + 1;
+              guessIndex(titleText ?? "", abs.pathname) ?? idx + 1;
             chapters.push({
               extChapterId,
               url: abs.toString(),
               indexNo: idxFromText > 0 ? idxFromText : idx + 1,
-              title,
+              title: titleText,
             });
           } catch {
             // bỏ qua link hỏng
           }
         });
+
+        if (Array.isArray(chaptersFromData)) {
+          chaptersFromData.forEach((item: any, idx: number) => {
+            const rawSlug =
+              item?.slug ||
+              item?.chapter_slug ||
+              item?.chapterSlug ||
+              item?.link ||
+              item?.url;
+            if (!rawSlug) return;
+            try {
+              let relative = String(rawSlug).trim();
+              if (/^https?:/i.test(relative)) {
+                const abs = new URL(relative);
+                relative = abs.pathname + abs.search;
+              }
+              relative = relative.replace(/^\/+/, "");
+              const base = slugPath.replace(/\/+$/, "");
+              if (!relative.startsWith(base)) {
+                relative = `${base}/${relative}`;
+              }
+              const abs = new URL(`/${relative.replace(/^\/+/, "")}`, origin);
+              const extChapterId = abs.pathname + abs.search;
+              const indexCandidate =
+                item?.chapterNumber ??
+                item?.chapter ??
+                item?.index ??
+                guessIndex(String(item?.name ?? item?.title ?? ""), abs.pathname) ??
+                idx + 1;
+              chapters.push({
+                extChapterId,
+                url: abs.toString(),
+                indexNo: Number(indexCandidate) > 0 ? Number(indexCandidate) : idx + 1,
+                title:
+                  item?.name ||
+                  item?.title ||
+                  item?.chapterName ||
+                  item?.chapter_title,
+              });
+            } catch {
+              // ignore invalid entry
+            }
+          });
+        }
 
         // Sắp xếp theo index rồi dedupe
         const seen = new Set<string>();
@@ -225,19 +419,17 @@ export class CrawlWorker implements OnModuleInit, OnModuleDestroy {
           })
           .map((ch, i) => ({
             ...ch,
-            indexNo: Number.isFinite(ch.indexNo) && ch.indexNo > 0 ? ch.indexNo : i + 1,
+            indexNo:
+              Number.isFinite(ch.indexNo) && ch.indexNo > 0 ? ch.indexNo : i + 1,
           }));
 
-        const origin = new URL(url).origin;
-
-        if (meta) {
-          const slugPath = meta.slug.replace(/^\/*|\/*$/g, "");
+        if (seriesMeta) {
+          const slugBase = seriesMeta.slug.replace(/^\/*|\/*$/g, "");
           const seenIds = new Set(normalized.map((ch) => ch.extChapterId));
-
-          for (let i = 1; i <= meta.total; i++) {
+          for (let i = 1; i <= seriesMeta.total; i++) {
             let fallbackUrl: URL | null = null;
             try {
-              fallbackUrl = new URL(`/${slugPath}/chuong-${i}`, origin);
+              fallbackUrl = new URL(`/${slugBase}/chuong-${i}`, origin);
             } catch {
               fallbackUrl = null;
             }
@@ -253,9 +445,9 @@ export class CrawlWorker implements OnModuleInit, OnModuleDestroy {
             seenIds.add(extChapterId);
           }
 
-          if (normalized.length < meta.total) {
+          if (normalized.length < seriesMeta.total) {
             this.logger.warn(
-              `Only ${normalized.length}/${meta.total} chapters discovered for series ${seriesId} (${extSeriesId})`
+              `Only ${normalized.length}/${seriesMeta.total} chapters discovered for series ${seriesId} (${extSeriesId})`
             );
           }
         }
@@ -286,15 +478,17 @@ export class CrawlWorker implements OnModuleInit, OnModuleDestroy {
                     url: ch.url,
                     indexNo: ch.indexNo,
                     title: ch.title,
-                },
-                opts: {
-                  jobId: `chapter_${sourceId}_${ch.extChapterId}`,
-                  removeOnComplete: true,
-                  removeOnFail: true,
-                },
-              }))
-            );
-          }
+                    buildId,
+                    storyPath: slugPath,
+                  },
+                  opts: {
+                    jobId: `chapter_${sourceId}_${ch.extChapterId}`,
+                    removeOnComplete: true,
+                    removeOnFail: true,
+                  },
+                }))
+              );
+            }
             this.logger.log(
               `Enqueued ${normalized.length} chapter jobs for series ${seriesId}`
             );
@@ -317,12 +511,15 @@ export class CrawlWorker implements OnModuleInit, OnModuleDestroy {
     this.chapterWorker = new Worker(
       "crawl-chapter",
       async (job) => {
-        const { sourceId, extChapterId, url, seriesId, indexNo } = job.data as {
+        const { sourceId, extChapterId, url, seriesId, indexNo, buildId, storyPath } = job
+          .data as {
           sourceId: string;
           extChapterId: string;
           url: string;
           seriesId: string;
           indexNo?: number;
+          buildId?: string;
+          storyPath?: string;
         };
 
         await sleep(jitter());
@@ -336,14 +533,48 @@ export class CrawlWorker implements OnModuleInit, OnModuleDestroy {
         const html = await res.body.text();
         const $ = loadHtml(html);
 
-        const chapterTitle =
+        let chapterTitle =
           $("h1").first().text().trim() ||
           $(".chapter-title").first().text().trim();
-        const contentHtml =
+        let contentHtml =
           $(".chapter-content").html() ??
           $("#chapter-content").html() ??
           $("article").html() ??
           "";
+
+        const origin = new URL(url).origin;
+        const chapterPath = extChapterId.replace(/^\/+/, "");
+        let nextChapterProps: any | null = null;
+        if (buildId && storyPath) {
+          const base = storyPath.replace(/^\/+|\/+$/g, "");
+          let rel = chapterPath;
+          if (!rel.startsWith(base)) rel = `${base}/${rel}`;
+          const chapterData = await fetchNextData(origin, buildId, rel).catch(() => null);
+          nextChapterProps = unwrapPageProps(chapterData);
+        }
+
+        if (nextChapterProps) {
+          const detail = findChapterDetail(nextChapterProps);
+          if (detail) {
+            chapterTitle =
+              detail?.name ||
+              detail?.title ||
+              detail?.chapterName ||
+              detail?.chapter_title ||
+              chapterTitle;
+            contentHtml =
+              detail?.chapterContent ||
+              detail?.chapter_content ||
+              detail?.content_html ||
+              detail?.content ||
+              contentHtml;
+          }
+          if (!contentHtml) {
+            const rich = findRichContent(nextChapterProps);
+            if (rich) contentHtml = rich;
+          }
+        }
+
         const contentText = normalizeHtmlToText(contentHtml);
 
         await upsertChapter(this.ds, {

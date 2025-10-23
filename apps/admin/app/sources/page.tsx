@@ -1,296 +1,412 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import * as React from "react";
 
-type Source = { id: string; name: string; base_url: string };
+/* UI kit – dùng đúng các file em đã có */
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE?.replace(/\/+$/, "") || "";
+/* -----------------------------------------------------------
+ * Types & helpers
+ * ---------------------------------------------------------*/
+type Source = {
+  id: string;
+  name: string;
+  domain?: string | null;
+  created_at?: string;
+};
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
-    cache: "no-store",
+type UpsertPayload = {
+  name: string;
+  domain?: string | null;
+};
+
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE?.replace(/\/+$/, "") ||
+  "http://localhost:4000";
+
+/** wrapper fetch tới API backend */
+async function api<T>(
+  path: string,
+  init?: RequestInit & { json?: any }
+): Promise<T> {
+  const url = `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+  const headers = new Headers(init?.headers);
+  if (init?.json !== undefined) {
+    headers.set("content-type", "application/json");
+  }
+  const res = await fetch(url, {
+    method: init?.method ?? "GET",
+    body: init?.json !== undefined ? JSON.stringify(init.json) : init?.body,
+    headers,
     credentials: "include",
+    cache: "no-store",
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`${res.status} ${res.statusText} ${text}`);
+    throw new Error(text || `Request failed ${res.status}`);
   }
-  return (await res.json()) as T;
+  return res.json() as Promise<T>;
 }
 
+/* -----------------------------------------------------------
+ * Page
+ * ---------------------------------------------------------*/
 export default function SourcesPage() {
-  // list & paging
-  const [sources, setSources] = useState<Source[]>([]);
-  const [q, setQ] = useState("");
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(50);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [items, setItems] = React.useState<Source[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [query, setQuery] = React.useState("");
+  const [createOpen, setCreateOpen] = React.useState(false);
 
-  const start = useMemo(() => page * pageSize, [page, pageSize]);
-  const end = useMemo(() => start + pageSize, [start, pageSize]);
+  const [editOpen, setEditOpen] = React.useState(false);
+  const [editing, setEditing] = React.useState<Source | null>(null);
 
-  // form create
-  const [cName, setCName] = useState("");
-  const [cBase, setCBase] = useState("");
+  const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
 
-  // inline edit
-  const [editId, setEditId] = useState<string | null>(null);
-  const [eName, setEName] = useState("");
-  const [eBase, setEBase] = useState("");
+  const filtered = React.useMemo(() => {
+    if (!query.trim()) return items;
+    const q = query.toLowerCase();
+    return items.filter(
+      (s) =>
+        s.name.toLowerCase().includes(q) ||
+        (s.domain ?? "").toLowerCase().includes(q) ||
+        s.id.toLowerCase().includes(q)
+    );
+  }, [items, query]);
 
   async function load() {
     setLoading(true);
-    setErr(null);
+    setError(null);
     try {
-      const list = await api<Source[]>(
-        `/v1/sources?limit=${pageSize}&offset=${start}${
-          q ? `&q=${encodeURIComponent(q)}` : ""
-        }`
-      );
-      setSources(list);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      const data = await api<{ items: Source[] }>("/v1/sources");
+      setItems(data.items ?? []);
+    } catch (e: any) {
+      setError(e?.message ?? "Load failed");
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
+  React.useEffect(() => {
+    // Lần đầu mount thì load
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, start, pageSize]);
-
-  async function createSource(e: React.FormEvent) {
-    e.preventDefault();
-    try {
-      await api(`/v1/sources`, {
-        method: "POST",
-        body: JSON.stringify({ name: cName, base_url: cBase }),
-      });
-      setCName("");
-      setCBase("");
-      load();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : String(e));
-    }
-  }
+  }, []);
 
   function startEdit(s: Source) {
-    setEditId(s.id);
-    setEName(s.name);
-    setEBase(s.base_url);
-  }
-  function cancelEdit() {
-    setEditId(null);
-    setEName("");
-    setEBase("");
+    setEditing(s);
+    setEditOpen(true);
   }
 
-  async function saveEdit(id: string) {
+  async function handleCreate(payload: UpsertPayload) {
+    setPending(true);
+    setError(null);
     try {
-      await api(`/v1/sources/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ name: eName, base_url: eBase }),
+      const created = await api<Source>("/v1/sources", {
+        method: "POST",
+        json: payload,
       });
-      cancelEdit();
-      load();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : String(e));
+      setItems((prev) => [created, ...prev]);
+      setCreateOpen(false);
+    } catch (e: any) {
+      setError(e?.message ?? "Create failed");
+    } finally {
+      setPending(false);
     }
   }
 
-  async function deleteRow(id: string) {
-    if (!confirm("Xoá nguồn này?")) return;
+  async function handleUpdate(id: string, payload: UpsertPayload) {
+    setPending(true);
+    setError(null);
     try {
-      await api(`/v1/sources/${id}`, { method: "DELETE" });
-      load();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : String(e));
+      const updated = await api<Source>(`/v1/sources/${id}`, {
+        method: "PATCH",
+        json: payload,
+      });
+      setItems((prev) => prev.map((x) => (x.id === id ? updated : x)));
+      setEditOpen(false);
+      setEditing(null);
+    } catch (e: any) {
+      setError(e?.message ?? "Update failed");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (!confirm("Xoá source này?")) return;
+    setPending(true);
+    setError(null);
+    try {
+      await api<void>(`/v1/sources/${id}`, { method: "DELETE" });
+      setItems((prev) => prev.filter((x) => x.id !== id));
+    } catch (e: any) {
+      setError(e?.message ?? "Delete failed");
+    } finally {
+      setPending(false);
     }
   }
 
   return (
-    <div className="mx-auto max-w-5xl p-6 space-y-8">
-      <h1 className="text-2xl font-semibold">Quản lý Sources</h1>
-
-      {/* Create */}
-      <form
-        onSubmit={createSource}
-        className="grid gap-3 rounded-2xl border p-4 shadow-sm"
-      >
-        <div className="grid gap-1">
-          <label className="text-sm font-medium">Tên nguồn</label>
-          <input
-            value={cName}
-            onChange={(e) => setCName(e.target.value)}
-            className="rounded-md border px-3 py-2"
-            placeholder="VD: Truyen QQ"
-            required
-          />
-        </div>
-        <div className="grid gap-1">
-          <label className="text-sm font-medium">Base URL</label>
-          <input
-            value={cBase}
-            onChange={(e) => setCBase(e.target.value)}
-            className="rounded-md border px-3 py-2"
-            placeholder="https://example.com"
-            required
-          />
-        </div>
-        <div>
-          <button className="rounded-xl bg-black px-4 py-2 text-white">
-            Tạo nguồn
-          </button>
-        </div>
-      </form>
-
-      {/* Search + paging */}
-      <div className="flex flex-wrap items-center gap-3">
-        <input
-          value={q}
-          onChange={(e) => {
-            setPage(0);
-            setQ(e.target.value);
-          }}
-          placeholder="Tìm theo tên hoặc base_url…"
-          className="w-80 rounded-md border px-3 py-2"
-        />
-        <button onClick={load} className="rounded-md border px-3 py-2">
-          Tìm
-        </button>
-
-        <label className="text-sm ml-auto">
-          Page size:&nbsp;
-          <input
-            type="number"
-            min={10}
-            step={10}
-            value={pageSize}
-            onChange={(e) => {
-              const v = Math.max(10, Number(e.target.value) || 10);
-              setPageSize(v);
-              setPage(0);
-            }}
-            className="w-24 rounded-md border px-3 py-1"
-          />
-        </label>
+    <div className="mx-auto max-w-6xl px-4 py-6">
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Sources</h1>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-            className="rounded-md border px-3 py-1"
-          >
-            ← Prev
-          </button>
-          <span className="text-sm">Page {page + 1}</span>
-          <button
-            onClick={() => setPage((p) => p + 1)}
-            className="rounded-md border px-3 py-1"
-          >
-            Next →
-          </button>
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Tìm theo tên, domain, id…"
+            className="w-64"
+          />
+          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+            <DialogTrigger asChild>
+              <Button>Tạo mới</Button>
+            </DialogTrigger>
+            <CreateOrEditDialog
+              title="Tạo Source"
+              pending={pending}
+              onSubmit={handleCreate}
+            />
+          </Dialog>
         </div>
       </div>
 
-      {err && <p className="text-sm text-red-600">{err}</p>}
-
-      {/* Table */}
-      <div className="overflow-auto rounded-2xl border">
-        <table className="min-w-full text-sm">
-          <thead className="bg-gray-50 text-left">
-            <tr>
-              <th className="px-3 py-2">Tên</th>
-              <th className="px-3 py-2">Base URL</th>
-              <th className="px-3 py-2">Hành động</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sources.length === 0 && (
-              <tr>
-                <td className="px-3 py-3 italic text-gray-500" colSpan={3}>
-                  {loading ? "Loading..." : "Không có nguồn"}
-                </td>
-              </tr>
-            )}
-            {sources.map((s) => (
-              <tr key={s.id} className="border-t">
-                <td className="px-3 py-2">
-                  {editId === s.id ? (
-                    <input
-                      value={eName}
-                      onChange={(e) => setEName(e.target.value)}
-                      className="w-full rounded-md border px-2 py-1"
-                    />
-                  ) : (
-                    s.name
-                  )}
-                </td>
-                <td className="px-3 py-2">
-                  {editId === s.id ? (
-                    <input
-                      value={eBase}
-                      onChange={(e) => setEBase(e.target.value)}
-                      className="w-full rounded-md border px-2 py-1"
-                    />
-                  ) : (
-                    <a
-                      href={s.base_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-blue-600 underline"
-                    >
-                      {s.base_url}
-                    </a>
-                  )}
-                </td>
-                <td className="px-3 py-2">
-                  {editId === s.id ? (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => saveEdit(s.id)}
-                        className="rounded-md border px-3 py-1"
-                      >
-                        Lưu
-                      </button>
-                      <button
-                        onClick={cancelEdit}
-                        className="rounded-md border px-3 py-1"
-                      >
-                        Huỷ
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => startEdit(s)}
-                        className="rounded-md border px-3 py-1"
-                      >
-                        Sửa
-                      </button>
-                      <button
-                        onClick={() => deleteRow(s.id)}
-                        className="rounded-md border px-3 py-1 text-red-700"
-                      >
-                        Xoá
-                      </button>
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <p className="text-xs text-gray-500">
-        API: <code>{API_BASE || "(relative)"}</code>
-      </p>
+      <Card>
+        <div className="flex items-center justify-between p-4">
+          <div className="text-sm text-muted-foreground">
+            {loading ? "Đang tải…" : `${filtered.length} nguồn`}
+            {error ? (
+              <span className="ml-2 text-destructive">• {error}</span>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={load} disabled={loading}>
+              Làm mới
+            </Button>
+          </div>
+        </div>
+        <Separator />
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[140px]">ID</TableHead>
+                <TableHead>Tên</TableHead>
+                <TableHead>Domain</TableHead>
+                <TableHead className="w-[160px]">Tạo lúc</TableHead>
+                <TableHead className="w-[160px]">Thao tác</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="py-10 text-center text-sm">
+                    Đang tải dữ liệu…
+                  </TableCell>
+                </TableRow>
+              ) : filtered.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="py-10 text-center text-sm">
+                    Không có dữ liệu
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filtered.map((s) => (
+                  <TableRow key={s.id}>
+                    <TableCell className="align-top">
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Badge variant="secondary" className="font-mono">
+                              {s.id.slice(0, 8)}
+                            </Badge>
+                          </TooltipTrigger>
+                          <TooltipContent className="font-mono text-xs">
+                            {s.id}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </TableCell>
+                    <TableCell className="align-top font-medium">
+                      {s.name}
+                    </TableCell>
+                    <TableCell className="align-top">
+                      {s.domain ? (
+                        <a
+                          className="text-primary underline-offset-2 hover:underline"
+                          href={`https://${s.domain}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {s.domain}
+                        </a>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="align-top text-sm text-muted-foreground">
+                      {s.created_at
+                        ? new Date(s.created_at).toLocaleString()
+                        : "—"}
+                    </TableCell>
+                    <TableCell className="align-top">
+                      <div className="flex gap-2">
+                        <Dialog
+                          open={editOpen && editing?.id === s.id}
+                          onOpenChange={(o) => {
+                            if (!o) setEditing(null);
+                            setEditOpen(o);
+                          }}
+                        >
+                          <DialogTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => startEdit(s)}
+                            >
+                              Sửa
+                            </Button>
+                          </DialogTrigger>
+                          <CreateOrEditDialog
+                            title="Sửa Source"
+                            defaultValues={{
+                              name: s.name,
+                              domain: s.domain ?? "",
+                            }}
+                            pending={pending}
+                            onSubmit={(payload) => handleUpdate(s.id, payload)}
+                          />
+                        </Dialog>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={pending}
+                          onClick={() => handleDelete(s.id)}
+                        >
+                          Xoá
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </Card>
     </div>
+  );
+}
+
+/* -----------------------------------------------------------
+ * Create/Edit dialog (dùng chung)
+ * ---------------------------------------------------------*/
+function CreateOrEditDialog({
+  title,
+  defaultValues,
+  pending,
+  onSubmit,
+}: {
+  title: string;
+  defaultValues?: { name?: string; domain?: string | null };
+  pending?: boolean;
+  onSubmit: (payload: UpsertPayload) => Promise<void> | void;
+}) {
+  const [name, setName] = React.useState(defaultValues?.name ?? "");
+  const [domain, setDomain] = React.useState(defaultValues?.domain ?? "");
+  const [err, setErr] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    setName(defaultValues?.name ?? "");
+    setDomain(defaultValues?.domain ?? "");
+  }, [defaultValues?.name, defaultValues?.domain]);
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+
+    const payload: UpsertPayload = {
+      name: name.trim(),
+      domain: domain.trim() ? domain.trim() : null,
+    };
+
+    if (!payload.name) {
+      setErr("Tên là bắt buộc.");
+      return;
+    }
+
+    onSubmit(payload);
+  }
+
+  return (
+    <DialogContent className="sm:max-w-lg">
+      <DialogHeader>
+        <DialogTitle>{title}</DialogTitle>
+        <DialogDescription>
+          Nhập thông tin cho nguồn crawl (ví dụ: name = “Truyện Chu Hay”, domain
+          = “truyenchuhay.vn”).
+        </DialogDescription>
+      </DialogHeader>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <Label htmlFor="name">Tên *</Label>
+          <Input
+            id="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Tên hiển thị…"
+          />
+        </div>
+
+        <div>
+          <Label htmlFor="domain">
+            Domain{" "}
+            <span className="text-muted-foreground">(không bắt buộc)</span>
+          </Label>
+          <Input
+            id="domain"
+            value={domain}
+            onChange={(e) => setDomain(e.target.value)}
+            placeholder="ví dụ: example.com"
+          />
+        </div>
+
+        {err ? <p className="text-sm text-destructive">{err}</p> : null}
+
+        <DialogFooter className="gap-2">
+          <Button type="submit" disabled={pending}>
+            {pending ? "Đang lưu…" : "Lưu"}
+          </Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
   );
 }

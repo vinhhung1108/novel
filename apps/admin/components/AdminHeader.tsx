@@ -12,6 +12,7 @@ const navItems = [
   { href: "/tags", label: "Tags", icon: "🏷️" },
   { href: "/authors", label: "Tác giả", icon: "✍️" },
   { href: "/crawl", label: "Crawler", icon: "🕷️" },
+  { href: "/sources", label: "Sources", icon: "📚" },
 ];
 
 export default function AdminHeader() {
@@ -55,7 +56,10 @@ export default function AdminHeader() {
   return (
     <header className="sticky top-0 z-40 w-full border-b border-zinc-200 bg-white/90 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4">
-        <Link href="/" className="flex items-center gap-2 text-lg font-semibold">
+        <Link
+          href="/"
+          className="flex items-center gap-2 text-lg font-semibold"
+        >
           <span className="grid h-8 w-8 place-items-center rounded-full bg-zinc-900 text-white">
             A
           </span>

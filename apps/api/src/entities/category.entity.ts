@@ -1,3 +1,4 @@
+// apps/api/src/entities/category.entity.ts
 import {
   Column,
   CreateDateColumn,

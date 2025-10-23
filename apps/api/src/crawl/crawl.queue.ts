@@ -1,9 +1,9 @@
 import { Queue } from "bullmq";
-import { Inject, Injectable } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
+import { envInt, envStr } from "../common/env";
 
-function int(v: string | undefined, d: number) {
-  return Number.isFinite(+(v ?? "")) ? +v! : d;
-}
+const toInt = (v: string | undefined, d: number) =>
+  Number.isFinite(+(v ?? "")) ? +v! : d;
 
 @Injectable()
 export class CrawlQueue {
@@ -12,29 +12,29 @@ export class CrawlQueue {
 
   constructor() {
     const connection = {
-      host: process.env.REDIS_HOST ?? "localhost",
-      port: +(process.env.REDIS_PORT ?? 6379),
+      host: envStr("REDIS_HOST", "localhost"),
+      port: envInt("REDIS_PORT", 6379, { min: 1, max: 65535 }),
     };
+
     const limiter = {
-      max: int(process.env.CRAWL_RATE_MAX, 10),
-      duration: int(process.env.CRAWL_RATE_DURATION_MS, 1000),
-      // Có thể dùng groupKey để giới hạn theo host nếu cần (nâng cấp sau)
-      // groupKey: 'host'
+      max: toInt(process.env.CRAWL_RATE_MAX, 10),
+      duration: toInt(process.env.CRAWL_RATE_DURATION_MS, 1000),
+    };
+
+    const defaultJobOptions = {
+      attempts: 5,
+      backoff: { type: "exponential" as const, delay: 5000 },
+      removeOnComplete: 1000,
+      removeOnFail: 1000,
     };
 
     this.seriesQueue = new Queue("crawl-series", {
       connection,
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: { type: "exponential", delay: 5000 },
-      },
+      defaultJobOptions,
     });
     this.chapterQueue = new Queue("crawl-chapter", {
       connection,
-      defaultJobOptions: {
-        attempts: 5,
-        backoff: { type: "exponential", delay: 7000 },
-      },
+      defaultJobOptions,
     });
   }
 }

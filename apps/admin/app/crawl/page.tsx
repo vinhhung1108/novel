@@ -1,942 +1,437 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { useAuth } from "@/components/AuthProvider";
+import * as React from "react";
+
+/* UI */
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+
 import {
-  createSource,
-  enqueueChapter,
-  enqueueSeries,
-  fetchSources,
-  fetchJobStatus,
-  CrawlSource,
-  CrawlJobStatusResponse,
-  CrawlQueueJobs,
-  CrawlJobItem,
-  JobStatusKey,
-} from "@/services/crawl";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableCaption,
+  TableFooter,
+} from "@/components/ui/table";
 
-type AlertState =
-  | {
-      type: "success" | "error";
-      message: string;
-    }
-  | null;
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
-type SourceFormState = {
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+/* -------------------------------------------------------------
+ * Types
+ * ------------------------------------------------------------- */
+
+type Source = {
+  id: string;
   name: string;
-  baseUrl: string;
+  domain?: string | null;
+  created_at?: string;
 };
 
-type SeriesFormState = {
-  sourceId: string;
-  extSeriesId: string;
+type Health = {
+  ok: boolean;
+  redis?: boolean;
+  queues?: {
+    series: {
+      waiting: number;
+      active: number;
+      completed: number;
+      failed: number;
+    };
+    chapter: {
+      waiting: number;
+      active: number;
+      completed: number;
+      failed: number;
+    };
+  };
+};
+
+type Job = {
+  id: string;
+  name: string;
+  queue: "crawl-series" | "crawl-chapter" | string;
+  state: "waiting" | "active" | "completed" | "failed" | "delayed" | "paused";
+  progress?: number;
+  attemptsMade?: number;
+  failedReason?: string | null;
+  timestamp?: number;
+};
+
+type EnqueuePayload = {
+  source_id: string;
   url: string;
+  ext_series_id: string; // external id (slug/path)
 };
 
-type ChapterFormState = {
-  sourceId: string;
-  seriesId: string;
-  extChapterId: string;
-  url: string;
-  indexNo: string;
+type EnqueueResponse = {
+  ok: boolean;
+  enqueued?: number;
+  seriesId?: string;
+  message?: string;
 };
 
-const cardCls =
-  "rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm space-y-4";
+/* -------------------------------------------------------------
+ * Helpers
+ * ------------------------------------------------------------- */
 
-const STATUS_ORDER: JobStatusKey[] = [
-  "waiting",
-  "active",
-  "delayed",
-  "failed",
-  "completed",
-];
+const API_BASE =
+  (process.env.NEXT_PUBLIC_API_URL as string | undefined) ??
+  "http://localhost:4000";
 
-export default function CrawlAdminPage() {
-  const { token, getAuthHeader } = useAuth();
-  const router = useRouter();
-
-  const [sources, setSources] = useState<CrawlSource[]>([]);
-  const [loadingSources, setLoadingSources] = useState(false);
-  const [sourceError, setSourceError] = useState("");
-  const [alert, setAlert] = useState<AlertState>(null);
-
-  const [sourceForm, setSourceForm] = useState<SourceFormState>({
-    name: "",
-    baseUrl: "",
-  });
-  const [seriesForm, setSeriesForm] = useState<SeriesFormState>({
-    sourceId: "",
-    extSeriesId: "",
-    url: "",
-  });
-  const [chapterForm, setChapterForm] = useState<ChapterFormState>({
-    sourceId: "",
-    seriesId: "",
-    extChapterId: "",
-    url: "",
-    indexNo: "",
-  });
-
-  const [creatingSource, setCreatingSource] = useState(false);
-  const [enqueueSeriesPending, setEnqueueSeriesPending] = useState(false);
-  const [enqueueChapterPending, setEnqueueChapterPending] = useState(false);
-  const [jobStatus, setJobStatus] = useState<CrawlJobStatusResponse | null>(
-    null
-  );
-  const [jobLoading, setJobLoading] = useState(false);
-  const [jobError, setJobError] = useState("");
-  const [lastJobRefresh, setLastJobRefresh] = useState<number | null>(null);
-  const [selectedJob, setSelectedJob] = useState<CrawlJobItem | null>(null);
-
-  useEffect(() => {
-    if (token === null) router.replace("/login");
-  }, [token, router]);
-
-  const loadSources = useCallback(async () => {
-    try {
-      setLoadingSources(true);
-      setSourceError("");
-      const res = await fetchSources(getAuthHeader);
-      const list = res?.items ?? [];
-      setSources(list);
-      if (list.length > 0) {
-        setSeriesForm((prev) =>
-          prev.sourceId
-            ? prev
-            : { ...prev, sourceId: prev.sourceId || list[0].id }
-        );
-        setChapterForm((prev) =>
-          prev.sourceId
-            ? prev
-            : { ...prev, sourceId: prev.sourceId || list[0].id }
-        );
-      }
-    } catch (err: any) {
-      setSourceError(
-        err?.message ? `Không tải được nguồn: ${err.message}` : "Lỗi tải nguồn"
-      );
-      setSources([]);
-    } finally {
-      setLoadingSources(false);
-    }
-  }, [getAuthHeader]);
-
-  const loadJobStatus = useCallback(
-    async (options?: { silent?: boolean }) => {
-      if (!token) return;
-      if (!options?.silent) {
-        setJobLoading(true);
-      }
-      try {
-        const res = await fetchJobStatus(getAuthHeader);
-        setJobStatus(res);
-        setJobError("");
-        setLastJobRefresh(Date.now());
-      } catch (err: any) {
-        setJobError(
-          err?.message
-            ? `Không tải được trạng thái job: ${err.message}`
-            : "Không tải được trạng thái job"
-        );
-        setJobStatus(null);
-      } finally {
-        if (!options?.silent) {
-          setJobLoading(false);
-        }
-      }
+async function json<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      "content-type": "application/json",
+      ...(init?.headers || {}),
     },
-    [getAuthHeader, token]
-  );
-
-  useEffect(() => {
-    if (!token) return;
-    void loadSources();
-    void loadJobStatus();
-    const timer = window.setInterval(() => {
-      void loadJobStatus({ silent: true });
-    }, 10000);
-    return () => window.clearInterval(timer);
-  }, [token, loadSources, loadJobStatus]);
-
-  useEffect(() => {
-    if (!alert) return;
-    const t = setTimeout(() => setAlert(null), 5000);
-    return () => clearTimeout(t);
-  }, [alert]);
-
-  const hasSources = sources.length > 0;
-  const sourceOptions = useMemo(
-    () =>
-      sources.map((s) => (
-        <option key={s.id} value={s.id}>
-          {s.name} • {s.baseUrl}
-        </option>
-      )),
-    [sources]
-  );
-
-  function showAlert(type: "success" | "error", message: string) {
-    setAlert({ type, message });
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`${res.status} ${res.statusText} - ${text}`);
   }
+  return (await res.json()) as T;
+}
 
-  async function handleCreateSource(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const name = sourceForm.name.trim();
-    const baseUrl = sourceForm.baseUrl.trim();
-    if (!name || !baseUrl) {
-      showAlert("error", "Tên và Base URL là bắt buộc");
+const fmt = {
+  num: (n: number | undefined) =>
+    typeof n === "number" && Number.isFinite(n) ? n.toLocaleString() : "-",
+  dt: (ts?: number | string) => {
+    if (!ts) return "-";
+    const d = typeof ts === "number" ? new Date(ts) : new Date(ts);
+    if (Number.isNaN(d.getTime())) return "-";
+    return d.toLocaleString();
+  },
+};
+
+/* -------------------------------------------------------------
+ * Page
+ * ------------------------------------------------------------- */
+
+export default function CrawlPage() {
+  /** data */
+  const [loading, setLoading] = React.useState(false);
+  const [sources, setSources] = React.useState<Source[]>([]);
+  const [health, setHealth] = React.useState<Health | null>(null);
+  const [jobs, setJobs] = React.useState<Job[]>([]);
+
+  /** form */
+  const [sourceId, setSourceId] = React.useState<string>("");
+  const [url, setUrl] = React.useState<string>("");
+  const [extSeriesId, setExtSeriesId] = React.useState<string>("");
+
+  const [enqueueing, setEnqueueing] = React.useState(false);
+  const [msg, setMsg] = React.useState<string | null>(null);
+  const [err, setErr] = React.useState<string | null>(null);
+
+  const loadAll = React.useCallback(async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      const [healthResp, srcResp, jobsResp] = await Promise.all([
+        json<Health>("/v1/crawl/health"),
+        json<{ items: Source[] }>("/v1/sources"),
+        json<{ items: Job[] }>("/v1/crawl/jobs"),
+      ]);
+      setHealth(healthResp);
+      setSources(srcResp?.items ?? []);
+      setJobs(jobsResp?.items ?? []);
+      if (!sourceId && srcResp?.items?.length) {
+        setSourceId(srcResp.items[0].id);
+      }
+    } catch (e: any) {
+      setErr(e?.message ?? String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [sourceId]);
+
+  React.useEffect(() => {
+    // initial
+    loadAll();
+  }, [loadAll]);
+
+  async function handleEnqueue(e: React.FormEvent) {
+    e.preventDefault();
+    setMsg(null);
+    setErr(null);
+    if (!sourceId || !url || !extSeriesId) {
+      setErr("Vui lòng chọn Source, nhập URL và External Series ID.");
       return;
     }
     try {
-      setCreatingSource(true);
-      await createSource({ name, baseUrl }, getAuthHeader);
-      setSourceForm({ name: "", baseUrl: "" });
-      showAlert("success", "Đã lưu nguồn crawl");
-      await loadSources();
-    } catch (err: any) {
-      showAlert(
-        "error",
-        err?.message
-          ? `Không thể lưu nguồn: ${truncate(err.message)}`
-          : "Không thể lưu nguồn"
+      setEnqueueing(true);
+      const payload: EnqueuePayload = {
+        source_id: sourceId,
+        url,
+        ext_series_id: extSeriesId,
+      };
+      const resp = await json<EnqueueResponse>("/v1/crawl/enqueue-series", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setMsg(
+        resp.ok
+          ? `Đã enqueue series thành công${resp.enqueued ? ` (${resp.enqueued} jobs)` : ""}.`
+          : (resp.message ?? "Enqueue không thành công.")
       );
+      // reload jobs nhanh
+      const jobsResp = await json<{ items: Job[] }>("/v1/crawl/jobs");
+      setJobs(jobsResp?.items ?? []);
+    } catch (e: any) {
+      setErr(e?.message ?? String(e));
     } finally {
-      setCreatingSource(false);
+      setEnqueueing(false);
     }
   }
 
-  async function handleEnqueueSeries(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const { sourceId, extSeriesId, url } = seriesForm;
-    if (!sourceId || !extSeriesId.trim() || !url.trim()) {
-      showAlert("error", "Cần chọn nguồn, nhập mã series và URL");
-      return;
-    }
-    try {
-      setEnqueueSeriesPending(true);
-      const res = await enqueueSeries(
-        {
-          sourceId,
-          extSeriesId: extSeriesId.trim(),
-          url: url.trim(),
-        },
-        getAuthHeader
-      );
-      showAlert(
-        "success",
-        res?.jobId ? `Đã enqueue series ${res.jobId}` : "Đã enqueue series"
-      );
-      setSeriesForm((prev) => ({ ...prev, extSeriesId: "", url: "" }));
-      void loadJobStatus({ silent: true });
-    } catch (err: any) {
-      showAlert(
-        "error",
-        err?.message
-          ? `Không thể enqueue series: ${truncate(err.message)}`
-          : "Không thể enqueue series"
-      );
-    } finally {
-      setEnqueueSeriesPending(false);
-    }
-  }
-
-  async function handleEnqueueChapter(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const { sourceId, seriesId, extChapterId, url, indexNo } = chapterForm;
-    if (!sourceId || !seriesId.trim() || !extChapterId.trim() || !url.trim()) {
-      showAlert("error", "Cần chọn nguồn và nhập đủ thông tin chương");
-      return;
-    }
-    const idx = indexNo.trim()
-      ? Number.parseInt(indexNo.trim(), 10)
-      : undefined;
-    if (Number.isNaN(idx)) {
-      showAlert("error", "IndexNo phải là số hợp lệ");
-      return;
-    }
-    try {
-      setEnqueueChapterPending(true);
-      const res = await enqueueChapter(
-        {
-          sourceId,
-          seriesId: seriesId.trim(),
-          extChapterId: extChapterId.trim(),
-          url: url.trim(),
-          indexNo: idx,
-        },
-        getAuthHeader
-      );
-      showAlert(
-        "success",
-        res?.jobId ? `Đã enqueue chương ${res.jobId}` : "Đã enqueue chương"
-      );
-      setChapterForm((prev) => ({
-        ...prev,
-        extChapterId: "",
-        url: "",
-        indexNo: "",
-      }));
-      void loadJobStatus({ silent: true });
-    } catch (err: any) {
-      showAlert(
-        "error",
-        err?.message
-          ? `Không thể enqueue chương: ${truncate(err.message)}`
-          : "Không thể enqueue chương"
-      );
-    } finally {
-      setEnqueueChapterPending(false);
-    }
+  function badgeForState(state: Job["state"]) {
+    const map: Record<string, string> = {
+      waiting: "bg-amber-50 text-amber-700 border border-amber-200",
+      delayed: "bg-amber-50 text-amber-700 border border-amber-200",
+      active: "bg-blue-50 text-blue-700 border border-blue-200",
+      completed: "bg-green-50 text-green-700 border border-green-200",
+      failed: "bg-red-50 text-red-700 border border-red-200",
+      paused: "bg-gray-100 text-gray-700 border border-gray-200",
+    };
+    return map[state] ?? "bg-gray-100 text-gray-700 border border-gray-200";
   }
 
   return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-6 px-6 pb-12 pt-6">
-      <header className="flex flex-wrap items-center gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-wide text-zinc-500">
-            Crawler
-          </p>
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
-            Quản lý Crawl
-          </h1>
-        </div>
-      </header>
-
-      {alert ? (
-        <div
-          className={`rounded-lg border p-4 text-sm ${
-            alert.type === "success"
-              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-rose-200 bg-rose-50 text-rose-700"
-          }`}
-        >
-          {alert.message}
-        </div>
-      ) : null}
-
-      <section className={cardCls}>
-        <div className="flex flex-wrap items-center gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-zinc-900">Nguồn hỗ trợ</h2>
-            <p className="text-sm text-zinc-500">
-              Thêm nguồn crawler và xem danh sách hiện có.
-            </p>
-          </div>
-          <button
-            onClick={() => void loadSources()}
-            className="ml-auto inline-flex items-center rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100"
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">Crawler</h1>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={loadAll}
+            disabled={loading}
+            className="min-w-[96px]"
           >
-            🔄 Làm mới
-          </button>
+            {loading ? "Refreshing…" : "Refresh"}
+          </Button>
         </div>
+      </div>
 
-        <form
-          onSubmit={handleCreateSource}
-          className="grid gap-3 rounded-xl border border-zinc-100 bg-zinc-50 p-4 sm:grid-cols-[2fr,2fr,auto]"
-        >
-          <label className="flex flex-col text-sm text-zinc-600">
-            Tên nguồn
-            <input
-              type="text"
-              value={sourceForm.name}
-              onChange={(e) =>
-                setSourceForm((prev) => ({ ...prev, name: e.target.value }))
-              }
-              className="mt-1 rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 focus:border-zinc-500 focus:outline-none"
-              placeholder="Ví dụ: TruyenCV"
-            />
-          </label>
-          <label className="flex flex-col text-sm text-zinc-600">
-            Base URL
-            <input
-              type="url"
-              value={sourceForm.baseUrl}
-              onChange={(e) =>
-                setSourceForm((prev) => ({ ...prev, baseUrl: e.target.value }))
-              }
-              className="mt-1 rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 focus:border-zinc-500 focus:outline-none"
-              placeholder="https://example.com"
-            />
-          </label>
-          <div className="flex items-end">
-            <button
-              type="submit"
-              disabled={creatingSource}
-              className="inline-flex w-full items-center justify-center rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
-            >
-              {creatingSource ? "Đang lưu..." : "Lưu nguồn"}
-            </button>
-          </div>
-        </form>
-
-        <div className="rounded-xl border border-dashed border-zinc-200">
-          {loadingSources ? (
-            <div className="p-6 text-sm text-zinc-500">Đang tải nguồn...</div>
-          ) : sourceError ? (
-            <div className="p-6 text-sm text-rose-600">{sourceError}</div>
-          ) : hasSources ? (
-            <ul className="divide-y divide-zinc-100">
-              {sources.map((source) => (
-                <li
-                  key={source.id}
-                  className="grid gap-2 px-4 py-3 sm:grid-cols-[2fr,2fr,auto]"
-                >
-                  <div>
-                    <p className="font-medium text-zinc-900">{source.name}</p>
-                    <p className="text-xs text-zinc-500">{source.id}</p>
-                  </div>
-                  <div className="text-sm text-zinc-600">{source.baseUrl}</div>
-                  <div className="text-sm text-zinc-500">
-                    {source.createdAt
-                      ? new Date(source.createdAt).toLocaleString()
-                      : "-"}
-                  </div>
-                </li>
-              ))}
-            </ul>
+      {/* Health */}
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm text-gray-600">Trạng thái:</span>
+          {health?.ok ? (
+            <Badge className="bg-green-50 text-green-700 border border-green-200">
+              OK
+            </Badge>
           ) : (
-            <div className="p-6 text-sm text-zinc-500">
-              Chưa có nguồn nào. Thêm mới ở form phía trên.
+            <Badge className="bg-red-50 text-red-700 border border-red-200">
+              DOWN
+            </Badge>
+          )}
+          <Separator className="h-6" orientation="vertical" />
+          <div className="flex items-center gap-3 text-sm">
+            <div>
+              <span className="text-gray-600 mr-1">Series:</span>
+              <span className="font-medium">
+                W {fmt.num(health?.queues?.series.waiting)} • A{" "}
+                {fmt.num(health?.queues?.series.active)} • C{" "}
+                {fmt.num(health?.queues?.series.completed)} • F{" "}
+                {fmt.num(health?.queues?.series.failed)}
+              </span>
+            </div>
+            <Separator className="h-4" orientation="vertical" />
+            <div>
+              <span className="text-gray-600 mr-1">Chapter:</span>
+              <span className="font-medium">
+                W {fmt.num(health?.queues?.chapter.waiting)} • A{" "}
+                {fmt.num(health?.queues?.chapter.active)} • C{" "}
+                {fmt.num(health?.queues?.chapter.completed)} • F{" "}
+                {fmt.num(health?.queues?.chapter.failed)}
+              </span>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* Enqueue form */}
+      <Card className="p-4">
+        <form
+          onSubmit={handleEnqueue}
+          className="grid grid-cols-1 gap-4 md:grid-cols-12"
+        >
+          {/* Source */}
+          <div className="md:col-span-3">
+            <Label className="mb-2 block">Source</Label>
+            <Select value={sourceId} onValueChangeAction={setSourceId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Chọn source" />
+              </SelectTrigger>
+              <SelectContent className="max-h-72">
+                {sources.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span>{s.name}</span>
+                      {s.domain ? (
+                        <span className="text-xs text-gray-500">
+                          {s.domain}
+                        </span>
+                      ) : null}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* URL */}
+          <div className="md:col-span-5">
+            <Label htmlFor="url" className="mb-2 block">
+              URL series
+            </Label>
+            <Input
+              id="url"
+              placeholder="https://example.com/some-story"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+
+          {/* External ID */}
+          <div className="md:col-span-3">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="ext" className="mb-2 block">
+                External series ID
+              </Label>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-xs text-gray-500 underline decoration-dotted cursor-help">
+                      Gợi ý
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <div className="max-w-[240px]">
+                      Thường là <b>pathname</b> của URL (ví dụ:{" "}
+                      <code>/truyen/abc</code>).
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+            <Input
+              id="ext"
+              placeholder="/truyen/abc"
+              value={extSeriesId}
+              onChange={(e) => setExtSeriesId(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+
+          {/* Submit */}
+          <div className="md:col-span-1 flex items-end">
+            <Button type="submit" disabled={enqueueing} className="w-full">
+              {enqueueing ? "Enqueue…" : "Enqueue"}
+            </Button>
+          </div>
+
+          {/* messages */}
+          {(msg || err) && (
+            <div className="md:col-span-12">
+              {msg ? (
+                <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+                  {msg}
+                </div>
+              ) : null}
+              {err ? (
+                <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+                  {err}
+                </div>
+              ) : null}
             </div>
           )}
-        </div>
-      </section>
+        </form>
+      </Card>
 
-      <section className="grid gap-6 lg:grid-cols-2">
-        <div className={cardCls}>
-          <div>
-            <h2 className="text-lg font-semibold text-zinc-900">
-              Enqueue Series
-            </h2>
-            <p className="text-sm text-zinc-500">
-              Tạo job crawl toàn bộ thông tin series và danh sách chương.
-            </p>
-          </div>
-          <form className="grid gap-3" onSubmit={handleEnqueueSeries}>
-            <label className="flex flex-col text-sm text-zinc-600">
-              Nguồn
-              <select
-                disabled={!hasSources}
-                value={seriesForm.sourceId}
-                onChange={(e) =>
-                  setSeriesForm((prev) => ({
-                    ...prev,
-                    sourceId: e.target.value,
-                  }))
-                }
-                className="mt-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 focus:border-zinc-500 focus:outline-none"
-              >
-                {sourceOptions.length ? (
-                  <option key="placeholder" value="" disabled>
-                    Chọn nguồn
-                  </option>
-                ) : null}
-                {sourceOptions}
-              </select>
-            </label>
-
-            <label className="flex flex-col text-sm text-zinc-600">
-              External Series ID
-              <input
-                type="text"
-                value={seriesForm.extSeriesId}
-                onChange={(e) =>
-                  setSeriesForm((prev) => ({
-                    ...prev,
-                    extSeriesId: e.target.value,
-                  }))
-                }
-                className="mt-1 rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 focus:border-zinc-500 focus:outline-none"
-                placeholder="ví dụ: /truyen/abc"
-              />
-            </label>
-
-            <label className="flex flex-col text-sm text-zinc-600">
-              URL
-              <input
-                type="url"
-                value={seriesForm.url}
-                onChange={(e) =>
-                  setSeriesForm((prev) => ({ ...prev, url: e.target.value }))
-                }
-                className="mt-1 rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 focus:border-zinc-500 focus:outline-none"
-                placeholder="https://example.com/truyen/abc"
-              />
-            </label>
-
-            <button
-              type="submit"
-              disabled={enqueueSeriesPending || !hasSources}
-              className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
-            >
-              {enqueueSeriesPending ? "Đang enqueue..." : "Enqueue series"}
-            </button>
-          </form>
-        </div>
-
-        <div className={cardCls}>
-          <div>
-            <h2 className="text-lg font-semibold text-zinc-900">
-              Enqueue Chapter
-            </h2>
-            <p className="text-sm text-zinc-500">
-              Tạo job crawl nội dung một chương cụ thể.
-            </p>
-          </div>
-
-          <form className="grid gap-3" onSubmit={handleEnqueueChapter}>
-            <label className="flex flex-col text-sm text-zinc-600">
-              Nguồn
-              <select
-                disabled={!hasSources}
-                value={chapterForm.sourceId}
-                onChange={(e) =>
-                  setChapterForm((prev) => ({
-                    ...prev,
-                    sourceId: e.target.value,
-                  }))
-                }
-                className="mt-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-900 focus:border-zinc-500 focus:outline-none"
-              >
-                {sourceOptions.length ? (
-                  <option key="placeholder" value="" disabled>
-                    Chọn nguồn
-                  </option>
-                ) : null}
-                {sourceOptions}
-              </select>
-            </label>
-
-            <label className="flex flex-col text-sm text-zinc-600">
-              Series ID (internal UUID)
-              <input
-                type="text"
-                value={chapterForm.seriesId}
-                onChange={(e) =>
-                  setChapterForm((prev) => ({
-                    ...prev,
-                    seriesId: e.target.value,
-                  }))
-                }
-                className="mt-1 rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 focus:border-zinc-500 focus:outline-none"
-                placeholder="UUID của novels.id"
-              />
-            </label>
-
-            <label className="flex flex-col text-sm text-zinc-600">
-              External Chapter ID
-              <input
-                type="text"
-                value={chapterForm.extChapterId}
-                onChange={(e) =>
-                  setChapterForm((prev) => ({
-                    ...prev,
-                    extChapterId: e.target.value,
-                  }))
-                }
-                className="mt-1 rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 focus:border-zinc-500 focus:outline-none"
-                placeholder="ví dụ: /truyen/abc/chuong-1"
-              />
-            </label>
-
-            <label className="flex flex-col text-sm text-zinc-600">
-              URL
-              <input
-                type="url"
-                value={chapterForm.url}
-                onChange={(e) =>
-                  setChapterForm((prev) => ({ ...prev, url: e.target.value }))
-                }
-                className="mt-1 rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 focus:border-zinc-500 focus:outline-none"
-                placeholder="https://example.com/chuong/1"
-              />
-            </label>
-
-            <label className="flex flex-col text-sm text-zinc-600">
-              IndexNo (tùy chọn)
-              <input
-                type="number"
-                min={1}
-                value={chapterForm.indexNo}
-                onChange={(e) =>
-                  setChapterForm((prev) => ({
-                    ...prev,
-                    indexNo: e.target.value,
-                  }))
-                }
-                className="mt-1 rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 focus:border-zinc-500 focus:outline-none"
-                placeholder="Để trống để auto"
-              />
-            </label>
-
-            <button
-              type="submit"
-              disabled={enqueueChapterPending || !hasSources}
-              className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-60"
-            >
-              {enqueueChapterPending ? "Đang enqueue..." : "Enqueue chapter"}
-            </button>
-          </form>
-        </div>
-      </section>
-
-      <section className={cardCls}>
-        <div className="flex flex-wrap items-center gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-zinc-900">
-              Trạng thái hàng đợi
-            </h2>
-            <p className="text-sm text-zinc-500">
-              Theo dõi các job đang chờ, đang chạy, hoàn thành hoặc lỗi.
-            </p>
-          </div>
-          <div className="ml-auto flex items-center gap-3 text-sm text-zinc-500">
-            <span>
-              Cập nhật:{" "}
-              {lastJobRefresh
-                ? new Date(lastJobRefresh).toLocaleTimeString()
-                : "Chưa có"}
-            </span>
-            <button
-              type="button"
-              onClick={() => void loadJobStatus()}
-              className="inline-flex items-center rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100"
-            >
-              🔄 Làm mới
-            </button>
-          </div>
-        </div>
-
-        {jobLoading && !jobStatus ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="h-40 animate-pulse rounded-xl bg-zinc-100" />
-            <div className="h-40 animate-pulse rounded-xl bg-zinc-100" />
-          </div>
-        ) : jobError ? (
-          <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-            {jobError}
-          </div>
-        ) : jobStatus ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            <QueueStatusCard
-              title="Series Queue"
-              data={jobStatus.series}
-              onSelectJob={setSelectedJob}
-            />
-            <QueueStatusCard
-              title="Chapter Queue"
-              data={jobStatus.chapter}
-              onSelectJob={setSelectedJob}
-            />
-          </div>
-        ) : (
-          <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-500">
-            Chưa có dữ liệu job để hiển thị.
-          </div>
-        )}
-      </section>
-
-      {selectedJob ? (
-        <JobDetailDialog
-          job={selectedJob}
-          onClose={() => setSelectedJob(null)}
-        />
-      ) : null}
-    </main>
-  );
-}
-
-function statusBadgeClasses(status: JobStatusKey) {
-  switch (status) {
-    case "waiting":
-      return "bg-amber-100 text-amber-700";
-    case "active":
-      return "bg-emerald-100 text-emerald-700";
-    case "delayed":
-      return "bg-sky-100 text-sky-700";
-    case "failed":
-      return "bg-rose-100 text-rose-700";
-    case "completed":
-      return "bg-zinc-900 text-white";
-    default:
-      return "bg-zinc-100 text-zinc-600";
-  }
-}
-
-function statusLabel(status: JobStatusKey) {
-  switch (status) {
-    case "waiting":
-      return "Chờ";
-    case "active":
-      return "Đang chạy";
-    case "delayed":
-      return "Delay";
-    case "failed":
-      return "Lỗi";
-    case "completed":
-      return "Xong";
-    default:
-      return status;
-  }
-}
-
-function describeJob(job: CrawlJobItem): string {
-  const map =
-    job.data && typeof job.data === "object"
-      ? (job.data as Record<string, unknown>)
-      : {};
-  const candidates = [
-    typeof map.title === "string" ? map.title : null,
-    typeof map.extChapterId === "string" ? map.extChapterId : null,
-    typeof map.extSeriesId === "string" ? map.extSeriesId : null,
-    typeof map.seriesId === "string" ? map.seriesId : null,
-    typeof map.url === "string" ? map.url : null,
-    typeof job.returnValue === "string" ? job.returnValue : null,
-  ];
-  const found = candidates.find((v) => v && v.trim());
-  return found ?? job.name;
-}
-
-function formatTimestamp(ts?: number | null) {
-  if (!ts) return "—";
-  try {
-    return new Date(ts).toLocaleTimeString();
-  } catch {
-    return "—";
-  }
-}
-
-function formatDateTime(ts?: number | null) {
-  if (!ts) return "—";
-  try {
-    return new Date(ts).toLocaleString();
-  } catch {
-    return "—";
-  }
-}
-
-function prettyJSON(value: unknown) {
-  try {
-    return JSON.stringify(value ?? null, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function QueueStatusCard({
-  title,
-  data,
-  onSelectJob,
-}: {
-  title: string;
-  data: CrawlQueueJobs | undefined;
-  onSelectJob: (job: CrawlJobItem) => void;
-}) {
-  const latest = STATUS_ORDER.flatMap((state) => data?.[state] ?? []).slice(
-    0,
-    10
-  );
-
-  return (
-    <div className="space-y-4 rounded-2xl border border-zinc-200 p-4">
-      <div>
-        <h3 className="text-base font-semibold text-zinc-900">{title}</h3>
-      </div>
-      <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">
-        {STATUS_ORDER.map((state) => {
-          const count = data?.[state]?.length ?? 0;
-          return (
-            <div
-              key={state}
-              className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2"
-            >
-              <div className="text-xs uppercase text-zinc-500">
-                {statusLabel(state)}
-              </div>
-              <div className="text-lg font-semibold text-zinc-900">
-                {count}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="rounded-xl border border-zinc-200">
-        {latest.length === 0 ? (
-          <div className="p-4 text-sm text-zinc-500">Không có job.</div>
-        ) : (
-          <table className="min-w-full divide-y divide-zinc-100 text-sm">
-            <thead className="bg-zinc-50 text-xs uppercase text-zinc-500">
-              <tr>
-                <th className="px-3 py-2 text-left">Trạng thái</th>
-                <th className="px-3 py-2 text-left">Job</th>
-                <th className="px-3 py-2 text-left">Lần thử</th>
-                <th className="px-3 py-2 text-left">Cập nhật</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100">
-              {latest.map((job) => (
-                <tr
-                  key={`${job.id}-${job.status}-${job.timestamp}`}
-                  onClick={() => onSelectJob(job)}
-                  className="cursor-pointer transition hover:bg-zinc-50"
-                >
-                  <td className="px-3 py-2 align-top">
-                    <span
-                      className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${statusBadgeClasses(
-                        job.status
-                      )}`}
-                    >
-                      {statusLabel(job.status)}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 align-top">
-                    <div className="font-medium text-zinc-900">
-                      {truncate(describeJob(job), 80)}
-                    </div>
-                    <div className="text-xs text-zinc-500">ID: {job.id}</div>
-                    {job.failedReason ? (
-                      <div className="text-xs text-rose-600">
-                        ⚠ {truncate(job.failedReason, 100)}
-                      </div>
-                    ) : null}
-                  </td>
-                  <td className="px-3 py-2 align-top text-sm text-zinc-600">
-                    {job.attemptsMade}
-                    {job.progress !== null ? (
-                      <span className="ml-1 text-xs text-zinc-500">
-                        ({job.progress}%)
-                      </span>
-                    ) : null}
-                  </td>
-                  <td className="px-3 py-2 align-top text-sm text-zinc-600">
-                    <div>Queue: {formatTimestamp(job.timestamp)}</div>
-                    <div>
-                      Update:{" "}
-                      {formatTimestamp(job.finishedOn ?? job.processedOn)}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function JobDetailDialog({
-  job,
-  onClose,
-}: {
-  job: CrawlJobItem;
-  onClose: () => void;
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
-      onClick={onClose}
-    >
-      <div
-        className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="flex items-center justify-between border-b border-zinc-200 px-6 py-4">
-          <div>
-            <p className="text-xs uppercase text-zinc-500">Chi tiết job</p>
-            <h3 className="text-lg font-semibold text-zinc-900">
-              {describeJob(job)}
-            </h3>
-          </div>
-          <button
-            onClick={onClose}
-            className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100"
-          >
-            Đóng
-          </button>
-        </header>
-
-        <div className="grid gap-4 overflow-auto px-6 py-5">
-          <section className="grid gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-sm sm:grid-cols-2">
-            <InfoRow label="Trạng thái" value={statusLabel(job.status)} />
-            <InfoRow label="Queue" value={formatDateTime(job.timestamp)} />
-            <InfoRow
-              label="Bắt đầu"
-              value={formatDateTime(job.processedOn)}
-            />
-            <InfoRow
-              label="Hoàn thành"
-              value={formatDateTime(job.finishedOn)}
-            />
-            <InfoRow label="Attempts" value={String(job.attemptsMade)} />
-            <InfoRow
-              label="Progress"
-              value={
-                job.progress !== null ? `${job.progress}%` : job.status === "completed" ? "100%" : "—"
-              }
-            />
-            <InfoRow label="Job ID" value={job.id} />
-            <InfoRow label="Tên job" value={job.name} />
-          </section>
-
-          {job.failedReason ? (
-            <section className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-              <h4 className="mb-2 text-sm font-semibold text-rose-800">
-                Lý do lỗi
-              </h4>
-              <p className="whitespace-pre-wrap break-words">
-                {job.failedReason}
-              </p>
-            </section>
+      {/* Jobs table */}
+      <Card className="p-0">
+        <Table>
+          <TableCaption>Danh sách jobs gần đây</TableCaption>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[140px]">Job</TableHead>
+              <TableHead className="w-[140px]">Queue</TableHead>
+              <TableHead className="w-[140px]">State</TableHead>
+              <TableHead className="w-[100px]">Progress</TableHead>
+              <TableHead className="w-[100px]">Attempts</TableHead>
+              <TableHead>Lý do lỗi</TableHead>
+              <TableHead className="w-[180px]">Thời gian</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {jobs.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center text-gray-500">
+                  Không có job nào.
+                </TableCell>
+              </TableRow>
+            ) : (
+              jobs.map((j) => (
+                <TableRow key={j.id}>
+                  <TableCell className="font-medium">{j.name}</TableCell>
+                  <TableCell>
+                    <Badge className="bg-gray-100 text-gray-700 border border-gray-200">
+                      {j.queue}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge className={badgeForState(j.state)}>{j.state}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    {typeof j.progress === "number" ? `${j.progress}%` : "-"}
+                  </TableCell>
+                  <TableCell>{j.attemptsMade ?? 0}</TableCell>
+                  <TableCell
+                    className="max-w-[420px] truncate"
+                    title={j.failedReason ?? ""}
+                  >
+                    {j.failedReason ?? ""}
+                  </TableCell>
+                  <TableCell>{fmt.dt(j.timestamp)}</TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+          {jobs.length > 0 ? (
+            <TableFooter>
+              <TableRow>
+                <TableCell colSpan={7} className="text-right">
+                  Tổng: {jobs.length}
+                </TableCell>
+              </TableRow>
+            </TableFooter>
           ) : null}
-
-          {job.stacktrace.length ? (
-            <section className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-700">
-              <h4 className="mb-2 text-sm font-semibold text-rose-800">
-                Stacktrace
-              </h4>
-              <pre className="overflow-auto whitespace-pre-wrap">
-                {job.stacktrace.join("\n")}
-              </pre>
-            </section>
-          ) : null}
-
-          <section className="space-y-2">
-            <h4 className="text-sm font-semibold text-zinc-700">
-              Payload (data)
-            </h4>
-            <pre className="max-h-60 overflow-auto rounded-lg border border-zinc-200 bg-zinc-900/95 p-3 text-xs text-zinc-100">
-              {prettyJSON(job.data)}
-            </pre>
-          </section>
-
-          <section className="space-y-2">
-            <h4 className="text-sm font-semibold text-zinc-700">
-              Return value
-            </h4>
-            <pre className="max-h-60 overflow-auto rounded-lg border border-zinc-200 bg-zinc-900/95 p-3 text-xs text-zinc-100">
-              {prettyJSON(job.returnValue)}
-            </pre>
-          </section>
-        </div>
-      </div>
+        </Table>
+      </Card>
     </div>
   );
-}
-
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex flex-col">
-      <span className="text-xs uppercase text-zinc-500">{label}</span>
-      <span className="truncate text-sm text-zinc-800">{value}</span>
-    </div>
-  );
-}
-
-function truncate(input: string, max = 160) {
-  if (input.length <= max) return input;
-  return `${input.slice(0, max)}…`;
 }

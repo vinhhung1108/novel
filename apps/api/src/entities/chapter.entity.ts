@@ -1,3 +1,4 @@
+// apps/api/src/entities/chapter.entity.ts
 import { Entity, Column, PrimaryGeneratedColumn, Index } from "typeorm";
 
 @Entity({ name: "chapters" })

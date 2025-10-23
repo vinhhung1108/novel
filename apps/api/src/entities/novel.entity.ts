@@ -1,3 +1,4 @@
+//apps/api/src/entities/novel.entity.ts
 import {
   Column,
   CreateDateColumn,

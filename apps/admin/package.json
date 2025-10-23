@@ -12,6 +12,8 @@
   "dependencies": {
     "@babel/runtime": "^7.28.4",
     "@novels/shared": "workspace:*",
+    "@radix-ui/react-icons": "^1.3.2",
+    "@types/react-dom": "^19.2.2",
     "next": "^15.0.3",
     "react": "^19.0.0-rc",
     "react-dom": "^19.0.0-rc",

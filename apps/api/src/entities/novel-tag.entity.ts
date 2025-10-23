@@ -1,3 +1,4 @@
+// apps/api/src/entities/novel-tag.entity.ts
 import { Entity, PrimaryColumn } from "typeorm";
 
 @Entity({ name: "novel_tags" })

@@ -1,310 +1,225 @@
-import { DataSource } from "typeorm";
-import { slugifySafe } from "@/common/utils/slug";
-import { ensureCrawlSchema } from "./schema";
+// apps/api/src/crawl/writers.ts
+import slugifyLib from "slugify";
+import { DataSource, EntityManager } from "typeorm";
 
-type EntityManager = ReturnType<DataSource["createEntityManager"]>;
+/** ---------- Input types ---------- */
+export type UpsertSeriesInput = {
+  title: string;
+  authorName?: string | null; // có thể null
+  coverUrl?: string | null; // (không lưu vào novels — bạn có thể map sang storage sau)
+  description?: string | null;
+  sourceId: string;
+  extSeriesId: string; // slug/đường dẫn ngoài
+  url?: string | null; // link trang gốc
+  originalTitle?: string | null;
+  altTitles?: string[] | null;
+  languageCode?: string | null; // ví dụ: "vi"
+};
 
-function fallbackSlug(base: string, prefix: string): string {
-  const normalized = slugifySafe(base);
-  if (normalized) return normalized;
-  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+export type UpsertChapterInput = {
+  sourceId: string;
+  extChapterId: string; // unique theo nguồn
+  seriesId: string; // novels.id
+  indexNo?: number | null;
+  title?: string | null;
+  content?: string | null; // text/html đã normalize — sẽ lưu vào chapter_bodies
+  extUrl?: string | null;
+};
+
+/** ---------- Helpers ---------- */
+
+function slugify(s: string): string {
+  return slugifyLib(s, { lower: true, strict: true, trim: true, locale: "vi" });
 }
 
-async function ensureAuthor(em: EntityManager, name?: string): Promise<string> {
-  const safeName = (name ?? "Unknown").trim() || "Unknown";
-
-  const existing = (await em.query(
-    `SELECT id FROM authors WHERE lower(name) = lower($1) LIMIT 1`,
-    [safeName]
-  )) as Array<{ id: string }>;
-  if (existing[0]?.id) return existing[0].id;
-
-  const baseSlug = slugifySafe(safeName) || fallbackSlug(safeName, "author");
-  let slug = baseSlug;
-  for (let i = 2; ; i++) {
-    const dup = (await em.query(
-      `SELECT 1 FROM authors WHERE slug = $1 LIMIT 1`,
-      [slug]
-    )) as Array<Record<string, unknown>>;
-    if (!dup[0]) break;
-    slug = `${baseSlug}-${i}`;
-    if (i > 200) throw new Error("Cannot generate unique author slug");
-  }
-
-  const inserted = (await em.query(
-    `INSERT INTO authors(name, slug) VALUES($1, $2) RETURNING id`,
-    [safeName, slug]
-  )) as Array<{ id: string }>;
-  return inserted[0].id;
+function nonEmpty(s?: string | null): string | null {
+  const v = (s ?? "").trim();
+  return v ? v : null;
 }
 
-function wordCountFromText(text?: string): number {
-  if (!text) return 0;
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (!normalized) return 0;
-  return normalized.split(" ").length;
-}
+/** Upsert 1 tác giả theo slug (null nếu không có tên) */
+async function upsertAuthor(
+  trx: EntityManager,
+  name?: string | null
+): Promise<string | null> {
+  const n = nonEmpty(name);
+  if (!n) return null;
 
-async function upsertChapterBody(
-  em: EntityManager,
-  chapterId: string,
-  novelId: string,
-  content: string
-) {
-  await em.query(
+  const authorSlug = slugify(n);
+
+  // Bảng authors: columns (id uuid pk, name text, slug text unique, created_at, updated_at)
+  const rows = await trx.query(
     `
-      INSERT INTO chapter_bodies(chapter_id, novel_id, content_html)
-      VALUES($1, $2, $3)
-      ON CONFLICT (chapter_id, novel_id) DO UPDATE
-        SET content_html = EXCLUDED.content_html,
-            updated_at = now()
+    INSERT INTO authors (name, slug)
+    VALUES ($1, $2)
+    ON CONFLICT (slug) DO UPDATE SET
+      name = EXCLUDED.name
+    RETURNING id
     `,
-    [chapterId, novelId, content]
+    [n, authorSlug]
   );
+
+  return rows?.[0]?.id ?? null;
 }
+
+/** ---------- Public functions ---------- */
 
 /**
- * Upsert Series (Novel) + map nguồn ngoài
- * - Tạo/tìm author
- * - Tạo/tìm novel qua slug hoặc map
- * - Cập nhật title/author nếu đã tồn tại
- * - Gắn mapping (source_id, ext_series_id) -> series_id
+ * Upsert series/novel vào bảng `novels` và map vào `series_source_map`.
+ * - novels unique theo (slug)
+ * - series_source_map unique theo (source_id, ext_series_id)
  */
 export async function upsertSeries(
   ds: DataSource,
-  p: {
-    title: string;
-    authorName?: string;
-    coverUrl?: string | null;
-    sourceId: string;
-    extSeriesId: string;
-    url: string;
-    description?: string | null;
-  }
+  input: UpsertSeriesInput
 ): Promise<{ seriesId: string }> {
-  if (!p.url) throw new Error("Series URL is required");
-  await ensureCrawlSchema(ds);
-  const em = ds.createEntityManager();
-  const authorId = await ensureAuthor(em, p.authorName);
+  const title = input.title?.trim();
+  if (!title) throw new Error("upsertSeries: missing title");
 
-  // 2) Tìm series qua mapping nguồn
-  const mapped = (await em.query(
-    `
-    SELECT n.id AS "seriesId"
-    FROM series_source_map m
-    JOIN novels n ON n.id = m.series_id
-    WHERE m.source_id = $1 AND m.ext_series_id = $2
-    LIMIT 1
-  `,
-    [p.sourceId, p.extSeriesId]
-  )) as Array<{ seriesId: string }>;
+  const slug = slugify(title);
 
-  let seriesId: string | undefined = mapped?.[0]?.seriesId;
+  const res = await ds.transaction(async (trx) => {
+    const authorId = await upsertAuthor(trx, input.authorName).catch(
+      () => null
+    );
 
-  // Slug từ title
-  const baseSlug =
-    slugifySafe(p.title) ||
-    fallbackSlug(p.extSeriesId || "series", "series").toLowerCase();
-  let slug = baseSlug;
-
-  if (!seriesId) {
-    for (let i = 2; ; i++) {
-      const existing = (await em.query(
-        `SELECT id, source FROM novels WHERE slug = $1 LIMIT 1`,
-        [slug]
-      )) as Array<{ id: string; source: string }>;
-      if (!existing[0]) break;
-      if (existing[0].source === "crawler") {
-        seriesId = existing[0].id;
-        break;
-      }
-      slug = `${baseSlug}-${i}`;
-      if (i > 200) throw new Error("Cannot generate unique novel slug");
-    }
-  } else {
-    const row = (await em.query(
-      `SELECT slug FROM novels WHERE id = $1`,
-      [seriesId]
-    )) as Array<{ slug: string }>;
-    slug = row[0]?.slug ?? slug;
-  }
-
-  if (!seriesId) {
-    // 3) Tạo mới
-    const r = (await em.query(
+    // Lưu vào novels
+    // Lưu ý: cover_image_key chưa có ở crawler, để null.
+    //       source = 'crawler', source_url = input.url
+    const novelRows = await trx.query(
       `
-      INSERT INTO novels(title, slug, author_id, source, source_url)
-      VALUES($1, $2, $3, 'crawler', $4)
+      INSERT INTO novels (
+        title,
+        slug,
+        description,
+        cover_image_key,
+        status,
+        source,
+        source_url,
+        author_id,
+        original_title,
+        alt_titles,
+        language_code
+      )
+      VALUES ($1,$2,$3,$4,'ongoing','crawler',$5,$6,$7,$8,$9)
+      ON CONFLICT (slug) DO UPDATE SET
+        title          = EXCLUDED.title,
+        description    = COALESCE(NULLIF(EXCLUDED.description, ''), novels.description),
+        author_id      = COALESCE(EXCLUDED.author_id, novels.author_id),
+        source         = EXCLUDED.source,
+        source_url     = COALESCE(EXCLUDED.source_url, novels.source_url),
+        original_title = COALESCE(EXCLUDED.original_title, novels.original_title),
+        alt_titles     = COALESCE(EXCLUDED.alt_titles, novels.alt_titles),
+        language_code  = COALESCE(EXCLUDED.language_code, novels.language_code)
       RETURNING id
-    `,
-      [p.title, slug, authorId, p.url]
-    )) as Array<{ id: string }>;
-    seriesId = r[0].id;
-
-    // 4) Lưu mapping nguồn
-    await em.query(
-      `
-      INSERT INTO series_source_map(source_id, ext_series_id, series_id, ext_url)
-      VALUES($1, $2, $3, $4)
-      ON CONFLICT (source_id, ext_series_id) DO UPDATE SET
-        series_id = EXCLUDED.series_id,
-        ext_url   = EXCLUDED.ext_url
-    `,
-      [p.sourceId, p.extSeriesId, seriesId, p.url || ""]
+      `,
+      [
+        title,
+        slug,
+        input.description ?? "",
+        null, // cover_image_key
+        input.url ?? null, // source_url
+        authorId, // author_id
+        nonEmpty(input.originalTitle),
+        input.altTitles ?? null, // text[]
+        nonEmpty(input.languageCode),
+      ]
     );
-  } else {
-    // 5) Đã có -> cập nhật thông tin cơ bản
-    await em.query(
-      `UPDATE novels
-       SET title=$1,
-           author_id=$2,
-           source='crawler',
-           source_url=$3,
-           updated_at=now()
-       WHERE id=$4`,
-      [p.title, authorId, p.url, seriesId]
-    );
-    // Đảm bảo có mapping (phòng khi dữ liệu cũ thiếu)
-    await em.query(
-      `
-      INSERT INTO series_source_map(source_id, ext_series_id, series_id, ext_url)
-      VALUES($1, $2, $3, $4)
-      ON CONFLICT (source_id, ext_series_id) DO UPDATE SET
-        series_id = EXCLUDED.series_id,
-        ext_url   = EXCLUDED.ext_url
-    `,
-      [p.sourceId, p.extSeriesId, seriesId, p.url || ""]
-    );
-  }
+    const seriesId: string = novelRows[0].id;
 
-  if (p.description) {
-    await em.query(`UPDATE novels SET description=$1 WHERE id=$2`, [p.description, seriesId]);
-  }
+    // Map vào series_source_map nếu bảng tồn tại
+    await trx
+      .query(
+        `
+        INSERT INTO series_source_map (source_id, ext_series_id, novel_id, url)
+        VALUES ($1,$2,$3,$4)
+        ON CONFLICT (source_id, ext_series_id) DO UPDATE SET
+          novel_id = EXCLUDED.novel_id,
+          url      = COALESCE(EXCLUDED.url, series_source_map.url)
+        `,
+        [input.sourceId, input.extSeriesId, seriesId, input.url ?? null]
+      )
+      .catch(() => {
+        // Bảng/map có thể chưa migrate — bỏ qua để không làm hỏng crawl
+      });
 
-  return { seriesId: seriesId! };
+    return { seriesId };
+  });
+
+  return res;
 }
 
 /**
- * Upsert Chapter + map nguồn ngoài
- * - Tạo mới chapter nếu chưa có map (auto index_no nếu thiếu)
- * - Cập nhật title/word_count/content nếu đã có
+ * Upsert 1 chapter vào `chapters` và body vào `chapter_bodies`,
+ * đồng thời map vào `chapter_source_map` nếu có.
  */
 export async function upsertChapter(
   ds: DataSource,
-  p: {
-    sourceId: string;
-    extChapterId: string;
-    seriesId: string;
-    indexNo?: number;
-    title?: string | null;
-    content: string;
-    extUrl: string;
-  }
-): Promise<{ chapterId: string }> {
-  if (!p.extUrl) throw new Error("Chapter URL is required");
-  await ensureCrawlSchema(ds);
-  const em = ds.createEntityManager();
+  input: UpsertChapterInput
+): Promise<{ chapterId: string; indexNo: number }> {
+  const idx =
+    Number.isFinite(input.indexNo as number) && (input.indexNo as number) > 0
+      ? (input.indexNo as number)
+      : 1;
+  const title = nonEmpty(input.title) ?? `Chương ${idx}`;
+  // slug cho chapter (không bắt buộc dùng, nhưng giúp debugging/hiển thị tốt hơn)
+  const chapSlug = slugify(`${title}-${idx}`);
 
-  // 1) Tìm chapter qua mapping
-  const mapped = (await em.query(
-    `
-    SELECT c.id AS "chapterId"
-    FROM chapter_source_map m
-    JOIN chapters c ON c.id = m.chapter_id
-    WHERE m.source_id=$1 AND m.ext_chapter_id=$2
-    LIMIT 1
-  `,
-    [p.sourceId, p.extChapterId]
-  )) as Array<{ chapterId: string }>;
-
-  const wordCount = wordCountFromText(p.content);
-  const title = p.title?.trim() || null;
-  const novelId = p.seriesId;
-
-  let chapterId: string;
-
-  if (!mapped?.[0]?.chapterId) {
-    // 2) Chưa có -> insert mới (tự tính index_no nếu thiếu)
-    let indexNo = Number.isFinite(p.indexNo) ? Number(p.indexNo) : undefined;
-    if (!indexNo || indexNo <= 0) {
-      const next = (await em.query(
-        `SELECT COALESCE(MAX(index_no), 0)::int + 1 AS next
-         FROM chapters
-         WHERE novel_id = $1`,
-        [novelId]
-      )) as Array<{ next: number | string }>;
-      indexNo = Number(next[0]?.next ?? 1);
-    }
-
-    const dup = (await em.query(
-      `SELECT id FROM chapters WHERE novel_id=$1 AND index_no=$2 LIMIT 1`,
-      [novelId, indexNo]
-    )) as Array<{ id: string }>;
-
-    const persistedTitle = title ?? `Chapter ${indexNo}`;
-
-    if (dup[0]?.id) {
-      chapterId = dup[0].id;
-      await em.query(
-        `
-        UPDATE chapters
-        SET title = COALESCE($1, title),
-            words_count = $2,
-            updated_at = now()
-        WHERE id = $3
+  const res = await ds.transaction(async (trx) => {
+    // 1) Upsert chapters theo unique (novel_id, index_no)
+    const chapterRows = await trx.query(
+      `
+      INSERT INTO chapters (novel_id, index_no, title, slug)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (novel_id, index_no) DO UPDATE SET
+        title = COALESCE(NULLIF(EXCLUDED.title, ''), chapters.title)
+      RETURNING id
       `,
-        [title ?? persistedTitle, wordCount, chapterId]
+      [input.seriesId, idx, title, chapSlug]
+    );
+    const chapterId: string = chapterRows[0].id;
+
+    // 2) Upsert body (nếu có nội dung)
+    if (nonEmpty(input.content)) {
+      await trx.query(
+        `
+        INSERT INTO chapter_bodies (chapter_id, novel_id, content_html)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (chapter_id) DO UPDATE SET
+          content_html = EXCLUDED.content_html,
+          updated_at   = now()
+        `,
+        [chapterId, input.seriesId, input.content]
       );
-    } else {
-      const inserted = (await em.query(
-        `
-        INSERT INTO chapters(novel_id, index_no, title, words_count, slug)
-        VALUES($1, $2, $3, $4, NULL)
-        RETURNING id
-      `,
-        [novelId, indexNo, persistedTitle, wordCount]
-      )) as Array<{ id: string }>;
-      chapterId = inserted[0].id;
     }
 
-    await em.query(
-      `
-      INSERT INTO chapter_source_map(source_id, ext_chapter_id, chapter_id, ext_url)
-      VALUES($1, $2, $3, $4)
-      ON CONFLICT (source_id, ext_chapter_id) DO UPDATE SET
-        chapter_id = EXCLUDED.chapter_id,
-        ext_url    = EXCLUDED.ext_url
-    `,
-      [p.sourceId, p.extChapterId, chapterId, p.extUrl]
-    );
-  } else {
-    // 3) Có rồi -> cập nhật nội dung
-    chapterId = mapped[0].chapterId as string;
-    await em.query(
-      `
-      UPDATE chapters
-      SET title = COALESCE($1, title),
-          index_no = COALESCE($2, index_no),
-          words_count = $3,
-          updated_at = now()
-      WHERE id=$4
-    `,
-      [title, p.indexNo ?? null, wordCount, chapterId]
-    );
+    // 3) Map chapter_source_map (nếu bảng có)
+    await trx
+      .query(
+        `
+        INSERT INTO chapter_source_map (source_id, ext_chapter_id, chapter_id, novel_id, index_no, url)
+        VALUES ($1,$2,$3,$4,$5,$6)
+        ON CONFLICT (source_id, ext_chapter_id) DO UPDATE SET
+          chapter_id = EXCLUDED.chapter_id,
+          novel_id   = EXCLUDED.novel_id,
+          index_no   = EXCLUDED.index_no,
+          url        = COALESCE(EXCLUDED.url, chapter_source_map.url)
+        `,
+        [
+          input.sourceId,
+          input.extChapterId,
+          chapterId,
+          input.seriesId,
+          idx,
+          input.extUrl ?? null,
+        ]
+      )
+      .catch(() => {
+        // Có thể chưa có migration map — bỏ qua
+      });
 
-    // Bổ sung ext_url nếu trước đó rỗng
-    await em.query(
-      `
-      UPDATE chapter_source_map
-      SET ext_url = $1,
-          chapter_id = $2
-      WHERE source_id=$3 AND ext_chapter_id=$4
-    `,
-      [p.extUrl, chapterId, p.sourceId, p.extChapterId]
-    );
-  }
+    return { chapterId, indexNo: idx };
+  });
 
-  await upsertChapterBody(em, chapterId, novelId, p.content);
-
-  return { chapterId };
+  return res;
 }

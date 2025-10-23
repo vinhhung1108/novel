@@ -1,3 +1,4 @@
+// apps/api/src/entities/tag.entity.ts
 import {
   Entity,
   PrimaryGeneratedColumn,

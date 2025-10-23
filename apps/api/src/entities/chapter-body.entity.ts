@@ -1,3 +1,4 @@
+// apps/api/src/entities/chapter-body.entity.ts
 import { Entity, Column, PrimaryColumn, Index } from "typeorm";
 
 /**

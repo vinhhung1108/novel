@@ -1,3 +1,4 @@
+// apps/api/src/entities/novel-view.entity.ts
 import {
   Entity,
   PrimaryGeneratedColumn,

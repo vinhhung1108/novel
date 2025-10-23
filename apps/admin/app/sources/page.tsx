@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-/* UI kit – dùng đúng các file em đã có */
+/* UI kit – chuẩn ShadCN */
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,18 +39,21 @@ import {
 type Source = {
   id: string;
   name: string;
-  domain?: string | null;
+  base_url: string;
   created_at?: string;
 };
 
 type UpsertPayload = {
   name: string;
-  domain?: string | null;
+  base_url: string;
 };
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE?.replace(/\/+$/, "") ||
   "http://localhost:4000";
+
+// Nếu Nest có setGlobalPrefix('v1') thì đổi thành "/v1/sources"
+const SOURCES_PATH = "/v1/sources";
 
 /** wrapper fetch tới API backend */
 async function api<T>(
@@ -59,12 +62,10 @@ async function api<T>(
 ): Promise<T> {
   const url = `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
   const headers = new Headers(init?.headers);
-  if (init?.json !== undefined) {
-    headers.set("content-type", "application/json");
-  }
+  if (init?.json !== undefined) headers.set("content-type", "application/json");
   const res = await fetch(url, {
     method: init?.method ?? "GET",
-    body: init?.json !== undefined ? JSON.stringify(init.json) : init?.body,
+    body: init?.json ? JSON.stringify(init.json) : init?.body,
     headers,
     credentials: "include",
     cache: "no-store",
@@ -76,38 +77,51 @@ async function api<T>(
   return res.json() as Promise<T>;
 }
 
+/** Chuẩn hoá domain/base_url nhập từ user */
+function normalizeBaseUrl(input: string): string {
+  let s = (input || "").trim();
+  if (!s) return "";
+  if (!/^https?:\/\//i.test(s)) s = "https://" + s;
+  try {
+    const u = new URL(s);
+    return u.host.toLowerCase();
+  } catch {
+    return input.trim();
+  }
+}
+
 /* -----------------------------------------------------------
- * Page
+ * Page component
  * ---------------------------------------------------------*/
 export default function SourcesPage() {
   const [items, setItems] = React.useState<Source[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [query, setQuery] = React.useState("");
   const [createOpen, setCreateOpen] = React.useState(false);
-
   const [editOpen, setEditOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Source | null>(null);
-
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  /** Lọc danh sách */
   const filtered = React.useMemo(() => {
     if (!query.trim()) return items;
     const q = query.toLowerCase();
     return items.filter(
       (s) =>
         s.name.toLowerCase().includes(q) ||
-        (s.domain ?? "").toLowerCase().includes(q) ||
+        s.base_url.toLowerCase().includes(q) ||
         s.id.toLowerCase().includes(q)
     );
   }, [items, query]);
 
+  /** Load list */
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api<{ items: Source[] }>("/v1/sources");
-      setItems(data.items ?? []);
+      const data = await api<Source[]>(SOURCES_PATH);
+      setItems(data ?? []);
     } catch (e: any) {
       setError(e?.message ?? "Load failed");
     } finally {
@@ -116,7 +130,6 @@ export default function SourcesPage() {
   }
 
   React.useEffect(() => {
-    // Lần đầu mount thì load
     load();
   }, []);
 
@@ -129,7 +142,7 @@ export default function SourcesPage() {
     setPending(true);
     setError(null);
     try {
-      const created = await api<Source>("/v1/sources", {
+      const created = await api<Source>(SOURCES_PATH, {
         method: "POST",
         json: payload,
       });
@@ -142,11 +155,11 @@ export default function SourcesPage() {
     }
   }
 
-  async function handleUpdate(id: string, payload: UpsertPayload) {
+  async function handleUpdate(id: string, payload: Partial<UpsertPayload>) {
     setPending(true);
     setError(null);
     try {
-      const updated = await api<Source>(`/v1/sources/${id}`, {
+      const updated = await api<Source>(`${SOURCES_PATH}/${id}`, {
         method: "PATCH",
         json: payload,
       });
@@ -165,7 +178,7 @@ export default function SourcesPage() {
     setPending(true);
     setError(null);
     try {
-      await api<void>(`/v1/sources/${id}`, { method: "DELETE" });
+      await api<void>(`${SOURCES_PATH}/${id}`, { method: "DELETE" });
       setItems((prev) => prev.filter((x) => x.id !== id));
     } catch (e: any) {
       setError(e?.message ?? "Delete failed");
@@ -174,6 +187,9 @@ export default function SourcesPage() {
     }
   }
 
+  /* -----------------------------------------------------------
+   * Render
+   * ---------------------------------------------------------*/
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
       <div className="mb-4 flex items-center justify-between">
@@ -212,7 +228,9 @@ export default function SourcesPage() {
             </Button>
           </div>
         </div>
+
         <Separator />
+
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -254,28 +272,32 @@ export default function SourcesPage() {
                         </Tooltip>
                       </TooltipProvider>
                     </TableCell>
+
                     <TableCell className="align-top font-medium">
                       {s.name}
                     </TableCell>
+
                     <TableCell className="align-top">
-                      {s.domain ? (
+                      {s.base_url ? (
                         <a
                           className="text-primary underline-offset-2 hover:underline"
-                          href={`https://${s.domain}`}
+                          href={`https://${s.base_url}`}
                           target="_blank"
                           rel="noreferrer"
                         >
-                          {s.domain}
+                          {s.base_url}
                         </a>
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
+
                     <TableCell className="align-top text-sm text-muted-foreground">
                       {s.created_at
                         ? new Date(s.created_at).toLocaleString()
                         : "—"}
                     </TableCell>
+
                     <TableCell className="align-top">
                       <div className="flex gap-2">
                         <Dialog
@@ -298,12 +320,13 @@ export default function SourcesPage() {
                             title="Sửa Source"
                             defaultValues={{
                               name: s.name,
-                              domain: s.domain ?? "",
+                              base_url: s.base_url,
                             }}
                             pending={pending}
                             onSubmit={(payload) => handleUpdate(s.id, payload)}
                           />
                         </Dialog>
+
                         <Button
                           variant="destructive"
                           size="sm"
@@ -335,30 +358,35 @@ function CreateOrEditDialog({
   onSubmit,
 }: {
   title: string;
-  defaultValues?: { name?: string; domain?: string | null };
+  defaultValues?: { name?: string; base_url?: string };
   pending?: boolean;
   onSubmit: (payload: UpsertPayload) => Promise<void> | void;
 }) {
   const [name, setName] = React.useState(defaultValues?.name ?? "");
-  const [domain, setDomain] = React.useState(defaultValues?.domain ?? "");
+  const [baseUrl, setBaseUrl] = React.useState(defaultValues?.base_url ?? "");
   const [err, setErr] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     setName(defaultValues?.name ?? "");
-    setDomain(defaultValues?.domain ?? "");
-  }, [defaultValues?.name, defaultValues?.domain]);
+    setBaseUrl(defaultValues?.base_url ?? "");
+  }, [defaultValues?.name, defaultValues?.base_url]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
 
+    const normalized = normalizeBaseUrl(baseUrl);
     const payload: UpsertPayload = {
       name: name.trim(),
-      domain: domain.trim() ? domain.trim() : null,
+      base_url: normalized,
     };
 
     if (!payload.name) {
       setErr("Tên là bắt buộc.");
+      return;
+    }
+    if (!payload.base_url) {
+      setErr("Domain/Base URL là bắt buộc.");
       return;
     }
 
@@ -370,8 +398,8 @@ function CreateOrEditDialog({
       <DialogHeader>
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription>
-          Nhập thông tin cho nguồn crawl (ví dụ: name = “Truyện Chu Hay”, domain
-          = “truyenchuhay.vn”).
+          Nhập thông tin cho nguồn crawl (ví dụ: name = “Truyện Chu Hay”, base
+          url = “truyenchuhay.vn”).
         </DialogDescription>
       </DialogHeader>
 
@@ -387,15 +415,12 @@ function CreateOrEditDialog({
         </div>
 
         <div>
-          <Label htmlFor="domain">
-            Domain{" "}
-            <span className="text-muted-foreground">(không bắt buộc)</span>
-          </Label>
+          <Label htmlFor="base_url">Domain/Base URL *</Label>
           <Input
-            id="domain"
-            value={domain}
-            onChange={(e) => setDomain(e.target.value)}
-            placeholder="ví dụ: example.com"
+            id="base_url"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder="ví dụ: example.com hoặc https://example.com/path"
           />
         </div>
 

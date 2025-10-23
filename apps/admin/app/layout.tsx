@@ -1,6 +1,7 @@
 import "./globals.css";
 import { AuthProvider } from "@/components/AuthProvider";
 import AdminHeader from "@/components/AdminHeader";
+import { ThemeProvider } from "next-themes";
 
 export default function RootLayout({
   children,
@@ -8,12 +9,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="vi">
-      <body className="bg-zinc-50 text-zinc-900">
-        <AuthProvider>
-          <AdminHeader />
-          <div className="mx-auto max-w-6xl px-4 py-6">{children}</div>
-        </AuthProvider>
+    <html suppressHydrationWarning>
+      <body className="bg-background text-foreground">
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          <AuthProvider>
+            <AdminHeader />
+            <div className="mx-auto max-w-6xl px-4 py-6">{children}</div>
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

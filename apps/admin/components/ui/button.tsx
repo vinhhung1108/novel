@@ -1,11 +1,40 @@
-"use client";
 import * as React from "react";
+import { Slot } from "@radix-ui/react-slot";
 import { cn } from "./cn";
 
-export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "default" | "outline" | "ghost" | "destructive" | "secondary";
-  size?: "sm" | "md" | "lg";
-  isLoading?: boolean;
+export type ButtonVariant =
+  | "default"
+  | "destructive"
+  | "outline"
+  | "secondary"
+  | "ghost"
+  | "link";
+
+export type ButtonSize = "default" | "sm" | "lg" | "icon";
+
+export interface ButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  asChild?: boolean;
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+}
+
+const variants: Record<ButtonVariant, string> = {
+  default: "bg-primary text-primary-foreground hover:bg-primary/90",
+  destructive:
+    "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+  outline:
+    "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
+  secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+  ghost: "hover:bg-accent hover:text-accent-foreground",
+  link: "text-primary underline-offset-4 hover:underline",
+};
+
+const sizes: Record<ButtonSize, string> = {
+  default: "h-9 px-4 py-2",
+  sm: "h-8 rounded-md px-3 text-xs",
+  lg: "h-10 rounded-md px-8",
+  icon: "h-9 w-9",
 };
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
@@ -13,60 +42,24 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     {
       className,
       variant = "default",
-      size = "md",
-      isLoading,
-      disabled,
-      children,
+      size = "default",
+      asChild = false,
       ...props
     },
     ref
   ) => {
-    const base =
-      "inline-flex items-center justify-center whitespace-nowrap rounded-2xl font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60";
-    const variants: Record<NonNullable<ButtonProps["variant"]>, string> = {
-      default: "bg-black text-white hover:bg-black/90 focus:ring-black",
-      outline:
-        "border border-gray-300 bg-white text-gray-900 hover:bg-gray-50 focus:ring-gray-300",
-      ghost: "bg-transparent text-gray-900 hover:bg-gray-100",
-      destructive: "bg-red-600 text-white hover:bg-red-700 focus:ring-red-600",
-      secondary:
-        "bg-gray-100 text-gray-900 hover:bg-gray-200 focus:ring-gray-200",
-    };
-    const sizes: Record<NonNullable<ButtonProps["size"]>, string> = {
-      sm: "h-8 px-3 text-sm",
-      md: "h-10 px-4 text-sm",
-      lg: "h-12 px-6 text-base",
-    };
+    const Comp = asChild ? Slot : "button";
     return (
-      <button
-        ref={ref}
-        className={cn(base, variants[variant], sizes[size], className)}
-        disabled={disabled || isLoading}
-        {...props}
-      >
-        {isLoading && (
-          <svg
-            className="mr-2 h-4 w-4 animate-spin"
-            viewBox="0 0 24 24"
-            fill="none"
-          >
-            <circle
-              className="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="4"
-            />
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-            />
-          </svg>
+      <Comp
+        className={cn(
+          "inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+          variants[variant],
+          sizes[size],
+          className
         )}
-        {children}
-      </button>
+        ref={ref}
+        {...props}
+      />
     );
   }
 );

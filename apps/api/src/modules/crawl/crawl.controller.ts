@@ -1,4 +1,11 @@
-import { Controller, Post, Body, BadRequestException } from "@nestjs/common";
+import {
+  Controller,
+  Post,
+  Body,
+  BadRequestException,
+  Get,
+  Query,
+} from "@nestjs/common";
 import { InjectQueue } from "@nestjs/bullmq";
 import { Queue } from "bullmq";
 import * as cheerio from "cheerio";
@@ -87,5 +94,31 @@ export class CrawlController {
   async persistChapter(@Body() dto: ChapterDTO) {
     const ch = await this.persist.upsertChapter(dto);
     return { ok: true, chapter_id: ch.id, index_no: ch.index_no };
+  }
+
+  @Get("queue-stats")
+  async stats() {
+    const [waiting, active, delayed, failed, completed] = await Promise.all([
+      this.crawlQ.getWaitingCount(),
+      this.crawlQ.getActiveCount(),
+      this.crawlQ.getDelayedCount(),
+      this.crawlQ.getFailedCount(),
+      this.crawlQ.getCompletedCount(),
+    ]);
+    return { waiting, active, delayed, failed, completed };
+  }
+
+  @Get("failed")
+  async failed(@Query("take") takeQ?: string) {
+    const take = Math.min(20, Math.max(1, Number(takeQ) || 10));
+    const jobs = await this.crawlQ.getFailed(0, take - 1);
+    return jobs.map((j) => ({
+      id: j.id,
+      name: j.name,
+      attemptsMade: j.attemptsMade,
+      failedReason: j.failedReason,
+      stacktrace: j.stacktrace?.slice(0, 1),
+      data: j.data,
+    }));
   }
 }

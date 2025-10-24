@@ -1,5 +1,6 @@
 import { Module, forwardRef } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
+import { BullModule } from "@nestjs/bullmq";
 import { Novel } from "@/entities/novel.entity";
 import { Chapter } from "@/entities/chapter.entity";
 import { ChapterBody } from "@/entities/chapter-body.entity";
@@ -17,6 +18,7 @@ import { CrawlController } from "./crawl.controller";
     TypeOrmModule.forFeature([Novel, Chapter, ChapterBody]),
     forwardRef(() => NovelsModule),
     forwardRef(() => ChaptersModule),
+    BullModule.registerQueue({ name: "crawl" }),
     UploadModule,
     SearchModule,
   ],

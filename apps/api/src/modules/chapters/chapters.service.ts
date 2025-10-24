@@ -249,59 +249,79 @@ export class ChaptersService {
     novel_id: string;
     index_no: number; // >=1
     title: string;
-    content_html: string; // đã sanitize ở crawler
+    content_html: string;
     url?: string | null;
     published_at?: Chapter["published_at"];
     ext?: { source_id: string; ext_chapter_id: string } | null;
   }) {
     const words = wordCountFromHtml(input.content_html || "");
 
-    // 1) Upsert chapter theo (novel_id, index_no)
-    await this.db.query(
-      `INSERT INTO public.chapters (novel_id, index_no, title, url, published_at, words_count)
-     VALUES ($1,$2,$3,$4,$5,$6)
-     ON CONFLICT (novel_id, index_no) DO UPDATE
-       SET title=EXCLUDED.title,
-           url=EXCLUDED.url,
-           published_at=EXCLUDED.published_at,
-           words_count=EXCLUDED.words_count,
-           updated_at=now()`,
-      [
-        input.novel_id,
-        input.index_no,
-        input.title.trim(),
-        input.url ?? null,
-        input.published_at ?? null,
-        words,
-      ]
-    );
+    return this.db.transaction(async (trx) => {
+      // 1) Upsert chapter và lấy lại record ngay
+      const rows = await trx.query(
+        `INSERT INTO public.chapters (novel_id, index_no, title, published_at, words_count)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (novel_id, index_no) DO UPDATE
+         SET title=EXCLUDED.title,
+             published_at=EXCLUDED.published_at,
+             words_count=EXCLUDED.words_count,
+             updated_at=now()
+       RETURNING id, novel_id, index_no, title`,
+        [
+          input.novel_id,
+          input.index_no,
+          input.title.trim(),
+          input.published_at ?? null,
+          words,
+        ]
+      );
+      const ch = rows[0];
 
-    const ch = await this.chapters.findOneOrFail({
-      where: { novel_id: input.novel_id, index_no: input.index_no },
+      // 2) Upsert body
+      await trx.query(
+        `INSERT INTO public.chapter_bodies (chapter_id, novel_id, content_html)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (chapter_id, novel_id) DO UPDATE
+         SET content_html=EXCLUDED.content_html,
+             updated_at=now()`,
+        [ch.id, input.novel_id, input.content_html || ""]
+      );
+
+      // 3) (tuỳ chọn) Map nguồn nếu có ext
+      if (input.ext?.source_id && input.ext?.ext_chapter_id) {
+        await trx.query(
+          `INSERT INTO public.chapter_source_map (source_id, ext_chapter_id, novel_id, index_no, chapter_id, url)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (source_id, ext_chapter_id) DO UPDATE
+           SET novel_id=EXCLUDED.novel_id,
+               index_no=EXCLUDED.index_no,
+               chapter_id=EXCLUDED.chapter_id,
+               url=COALESCE(EXCLUDED.url, chapter_source_map.url),
+               updated_at=now()`,
+          [
+            input.ext.source_id,
+            input.ext.ext_chapter_id,
+            ch.novel_id,
+            ch.index_no,
+            ch.id,
+            input.url ?? null,
+          ]
+        );
+      }
+
+      // 4) Index search (best-effort)
+      this.search.chapters
+        .addDocuments([
+          {
+            id: ch.id,
+            novel_id: ch.novel_id,
+            index_no: ch.index_no,
+            title: ch.title,
+          },
+        ])
+        .catch(() => {});
+
+      return ch as Chapter;
     });
-
-    // 2) Upsert body theo (chapter_id)
-    await this.db.query(
-      `INSERT INTO public.chapter_bodies (chapter_id, novel_id, content_html)
-     VALUES ($1,$2,$3)
-     ON CONFLICT (chapter_id, novel_id) DO UPDATE
-       SET content_html=EXCLUDED.content_html,
-           updated_at=now()`,
-      [ch.id, input.novel_id, input.content_html || ""]
-    );
-
-    // 3) Index vào search (không chặn pipeline nếu lỗi)
-    this.search.chapters
-      .addDocuments([
-        {
-          id: ch.id,
-          novel_id: ch.novel_id,
-          index_no: ch.index_no,
-          title: ch.title,
-        },
-      ])
-      .catch(() => {});
-
-    return ch;
   }
 }

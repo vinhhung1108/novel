@@ -244,4 +244,64 @@ export class ChaptersService {
     );
     return (rows?.[0]?.max ?? 0) + 1;
   }
+
+  async upsertFromCrawl(input: {
+    novel_id: string;
+    index_no: number; // >=1
+    title: string;
+    content_html: string; // đã sanitize ở crawler
+    url?: string | null;
+    published_at?: Chapter["published_at"];
+    ext?: { source_id: string; ext_chapter_id: string } | null;
+  }) {
+    const words = wordCountFromHtml(input.content_html || "");
+
+    // 1) Upsert chapter theo (novel_id, index_no)
+    await this.db.query(
+      `INSERT INTO public.chapters (novel_id, index_no, title, url, published_at, words_count)
+     VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (novel_id, index_no) DO UPDATE
+       SET title=EXCLUDED.title,
+           url=EXCLUDED.url,
+           published_at=EXCLUDED.published_at,
+           words_count=EXCLUDED.words_count,
+           updated_at=now()`,
+      [
+        input.novel_id,
+        input.index_no,
+        input.title.trim(),
+        input.url ?? null,
+        input.published_at ?? null,
+        words,
+      ]
+    );
+
+    const ch = await this.chapters.findOneOrFail({
+      where: { novel_id: input.novel_id, index_no: input.index_no },
+    });
+
+    // 2) Upsert body theo (chapter_id)
+    await this.db.query(
+      `INSERT INTO public.chapter_bodies (chapter_id, novel_id, content_html)
+     VALUES ($1,$2,$3)
+     ON CONFLICT (chapter_id, novel_id) DO UPDATE
+       SET content_html=EXCLUDED.content_html,
+           updated_at=now()`,
+      [ch.id, input.novel_id, input.content_html || ""]
+    );
+
+    // 3) Index vào search (không chặn pipeline nếu lỗi)
+    this.search.chapters
+      .addDocuments([
+        {
+          id: ch.id,
+          novel_id: ch.novel_id,
+          index_no: ch.index_no,
+          title: ch.title,
+        },
+      ])
+      .catch(() => {});
+
+    return ch;
+  }
 }

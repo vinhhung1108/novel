@@ -5,11 +5,15 @@ import { ChapterBody } from "@/entities/chapter-body.entity";
 import { Novel } from "@/entities/novel.entity";
 import { ChaptersController } from "./chapters.controller";
 import { ChaptersService } from "./chapters.service";
-import { SearchService } from "@/search/search.service";
+import { SearchModule } from "@/search/search.module";
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Chapter, ChapterBody, Novel])],
+  imports: [
+    TypeOrmModule.forFeature([Chapter, ChapterBody, Novel]),
+    SearchModule,
+  ],
   controllers: [ChaptersController],
-  providers: [ChaptersService, SearchService],
+  providers: [ChaptersService],
+  exports: [ChaptersService],
 })
 export class ChaptersModule {}

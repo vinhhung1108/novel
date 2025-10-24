@@ -11,6 +11,7 @@ import { Novel } from "../entities/novel.entity";
 import { StorageService } from "@/upload/storage.service";
 import { CreateNovelDto } from "./dto/create-novel.dto";
 import { QueryFailedError } from "typeorm";
+import { SourceMapsService } from "@/modules/crawl/source-maps.service";
 
 /** slugify an toàn (chuyển đ/Đ → d, bỏ dấu, giữ a-z0-9-) */
 function slugifySafe(input: string): string {
@@ -182,17 +183,14 @@ export class NovelsService implements OnModuleInit {
       .take(safeLimit);
 
     if (keyword) {
-      qb.where(
-        "LOWER(novel.title) LIKE :kw OR LOWER(novel.slug) LIKE :kw",
-        { kw: `%${keyword}%` }
-      );
+      qb.where("LOWER(novel.title) LIKE :kw OR LOWER(novel.slug) LIKE :kw", {
+        kw: `%${keyword}%`,
+      });
     }
 
     const [items, total] = await qb.getManyAndCount();
     return {
-      items: items.map((item) =>
-        this.mapToSummary(item as SummarySource)
-      ),
+      items: items.map((item) => this.mapToSummary(item as SummarySource)),
       total,
       page: safePage,
       limit: safeLimit,
@@ -311,7 +309,10 @@ export class NovelsService implements OnModuleInit {
     }
   }
 
-  async update(id: string, data: UpdateNovelInput): Promise<NovelDetailResponse | null> {
+  async update(
+    id: string,
+    data: UpdateNovelInput
+  ): Promise<NovelDetailResponse | null> {
     const novel = await this.novels.findOne({ where: { id } });
     if (!novel) throw new NotFoundException("Novel not found");
 
@@ -368,19 +369,17 @@ export class NovelsService implements OnModuleInit {
     const novel = await this.novels.findOne({ where: { id } });
     if (!novel) throw new NotFoundException("Novel not found");
     await this.db.transaction(async (trx) => {
-      await trx.query(
-        `DELETE FROM public.chapter_bodies WHERE novel_id = $1`,
-        [id]
-      );
+      await trx.query(`DELETE FROM public.chapter_bodies WHERE novel_id = $1`, [
+        id,
+      ]);
       await trx.query(`DELETE FROM public.chapters WHERE novel_id = $1`, [id]);
       await trx.query(
         `DELETE FROM public.novel_categories WHERE novel_id = $1`,
         [id]
       );
-      await trx.query(
-        `DELETE FROM public.novel_tags WHERE novel_id = $1`,
-        [id]
-      );
+      await trx.query(`DELETE FROM public.novel_tags WHERE novel_id = $1`, [
+        id,
+      ]);
       await trx.getRepository(Novel).delete({ id });
     });
     await this.storage.deleteObject(novel.cover_image_key);
@@ -453,9 +452,7 @@ export class NovelsService implements OnModuleInit {
     const summary = this.mapToSummary(novel);
     return {
       ...summary,
-      category_ids: Array.isArray(novel.category_ids)
-        ? novel.category_ids
-        : [],
+      category_ids: Array.isArray(novel.category_ids) ? novel.category_ids : [],
       tag_ids: Array.isArray(novel.tag_ids) ? novel.tag_ids : [],
     };
   }
@@ -464,6 +461,81 @@ export class NovelsService implements OnModuleInit {
     if (typeof value === "number") return value;
     if (value === null || value === undefined) return "0";
     return value;
+  }
+
+  async upsertFromCrawl(
+    input: {
+      source_id: string; // 'truyenchuhay' | 'truyenfull'
+      ext_series_id: string; // slug/id ngoài
+      url?: string | null;
+      title: string;
+      slug: string; // đã slugifySafe ở crawler
+      description?: string | null;
+      cover_image_key?: string | null;
+      status?: Novel["status"];
+      author_id?: string | null;
+      original_title?: string | null;
+      alt_titles?: string[] | null;
+      language_code?: string | null;
+      is_featured?: boolean;
+      mature?: boolean;
+      priority?: number;
+    },
+    maps: SourceMapsService
+  ): Promise<Novel> {
+    const sSlug = (input.slug || "").toLowerCase();
+
+    // 1) Ưu tiên tìm bằng series_source_map
+    const mapped = await maps.findNovelIdBySeriesMap(
+      input.source_id,
+      input.ext_series_id
+    );
+    let novel = mapped
+      ? await this.novels.findOne({ where: { id: mapped } })
+      : null;
+
+    // 2) Fallback theo slug (đã unique)
+    if (!novel) {
+      novel = await this.novels.findOne({ where: { slug: sSlug } });
+    }
+
+    const payload: Partial<Novel> = {
+      title: input.title.trim(),
+      slug: sSlug,
+      description: input.description ?? "",
+      cover_image_key: input.cover_image_key ?? null,
+      status: input.status ?? "ongoing",
+      source: "crawler",
+      source_url: input.url ?? null,
+      author_id: input.author_id ?? null,
+      original_title: input.original_title ?? null,
+      alt_titles: Array.isArray(input.alt_titles) ? input.alt_titles : null,
+      language_code: input.language_code ?? null,
+      is_featured: !!input.is_featured,
+      mature: !!input.mature,
+      priority: typeof input.priority === "number" ? input.priority : 0,
+    };
+
+    if (!novel) {
+      novel = await this.novels.save(this.novels.create(payload));
+    } else {
+      // không override cover admin đã đặt tay nếu sau này bạn muốn (tuỳ chọn)
+      await this.novels.update(
+        { id: novel.id },
+        { ...payload, updated_at: new Date() }
+      );
+      novel = await this.novels.findOneOrFail({ where: { id: novel.id } });
+    }
+
+    // 3) Ghi series_source_map
+    await maps.upsertSeriesMap({
+      source_id: input.source_id,
+      ext_series_id: input.ext_series_id,
+      novel_id: novel.id,
+      url: input.url ?? null,
+    });
+
+    return novel;
   }
 }
 

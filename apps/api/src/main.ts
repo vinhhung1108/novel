@@ -1,11 +1,9 @@
-// apps/api/src/main.ts
 import "reflect-metadata";
 import "./env";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
 import helmet from "helmet";
 import { ValidationPipe } from "@nestjs/common";
-import { setupBullBoard } from "./crawl/crawl.dashboard";
 
 function parseOrigins(raw?: string): string[] {
   if (!raw) return [];
@@ -47,9 +45,6 @@ async function bootstrap() {
 
   // Bảo mật cơ bản
   app.use(helmet());
-
-  // Bull Board (Express)
-  setupBullBoard(app.getHttpAdapter().getInstance());
 
   const port = Number(process.env.API_PORT || 4000);
   await app.listen(port);

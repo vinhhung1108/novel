@@ -3,8 +3,6 @@ import { ThrottlerModule } from "@nestjs/throttler";
 import { APP_GUARD } from "@nestjs/core";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { ConfigModule } from "@nestjs/config";
-import { CrawlModule } from "./crawl/crawl.module";
-
 import { HealthController } from "./health.controller";
 import {
   AppThrottlerGuard,
@@ -28,6 +26,8 @@ import { ChaptersModule } from "./modules/chapters/chapters.module";
 import { StatsModule } from "./modules/stats/stats.module";
 import { CategoriesModule } from "./modules/categories/categories.module";
 import { SourcesModule } from "./sources/sources.module";
+import { CrawlModule } from "@/modules/crawl/crawl.module";
+import { QueuesModule } from "./queues/queues.module";
 
 @Module({
   imports: [
@@ -64,8 +64,9 @@ import { SourcesModule } from "./sources/sources.module";
     ChaptersModule,
     StatsModule,
     CategoriesModule,
-    CrawlModule,
     SourcesModule,
+    CrawlModule,
+    QueuesModule,
   ],
   controllers: [HealthController],
   providers: [

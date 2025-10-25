@@ -290,12 +290,13 @@ export class ChaptersService {
       // 3) (tuỳ chọn) Map nguồn nếu có ext
       if (input.ext?.source_id && input.ext?.ext_chapter_id) {
         await trx.query(
-          `INSERT INTO public.chapter_source_map (source_id, ext_chapter_id, novel_id, index_no, chapter_id, url)
-         VALUES ($1,$2,$3,$4,$5,$6)
+          `INSERT INTO public.chapter_source_map (source_id, ext_chapter_id, novel_id, index_no, chapter_id, ext_url, url)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
          ON CONFLICT (source_id, ext_chapter_id) DO UPDATE
            SET novel_id=EXCLUDED.novel_id,
                index_no=EXCLUDED.index_no,
                chapter_id=EXCLUDED.chapter_id,
+               ext_url=COALESCE(EXCLUDED.ext_url, chapter_source_map.ext_url),
                url=COALESCE(EXCLUDED.url, chapter_source_map.url),
                updated_at=now()`,
           [
@@ -304,6 +305,7 @@ export class ChaptersService {
             ch.novel_id,
             ch.index_no,
             ch.id,
+            input.url ?? input.ext.ext_chapter_id,
             input.url ?? null,
           ]
         );

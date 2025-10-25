@@ -14,6 +14,9 @@ export class ChapterSourceMap {
   @Column("uuid")
   chapter_id!: string;
 
+  @Column("text")
+  ext_url!: string;
+
   @Column("uuid")
   novel_id!: string;
 

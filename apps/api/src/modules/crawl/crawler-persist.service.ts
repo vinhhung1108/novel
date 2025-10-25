@@ -1,7 +1,10 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, InternalServerErrorException } from "@nestjs/common";
+import { InjectDataSource } from "@nestjs/typeorm";
 import { NovelsService } from "@/novels/novels.service";
 import { ChaptersService } from "@/modules/chapters/chapters.service";
 import { SourceMapsService } from "./source-maps.service";
+import { DataSource } from "typeorm";
+import { Chapter } from "@/entities/chapter.entity";
 
 export type NovelDTO = {
   source_id: string; // 'truyenchuhay' | 'truyenfull'
@@ -35,23 +38,74 @@ export type ChapterDTO = {
 
 @Injectable()
 export class CrawlerPersistService {
+  private static readonly UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
   constructor(
     private readonly novels: NovelsService,
     private readonly chapters: ChaptersService,
-    private readonly maps: SourceMapsService
+    private readonly maps: SourceMapsService,
+    @InjectDataSource() private readonly db: DataSource
   ) {}
 
+  private async normalizeSourceId(identifier: string): Promise<string> {
+    const raw = identifier?.trim();
+    if (!raw) {
+      throw new InternalServerErrorException("source_id is required");
+    }
+
+    if (CrawlerPersistService.UUID_RE.test(raw)) return raw;
+
+    const lower = raw.toLowerCase();
+    const like = `%${lower}%`;
+
+    const rows: Array<{ id: string; name: string; base_url: string }> =
+      await this.db.query(
+        `
+        SELECT id, name, base_url
+        FROM source
+        WHERE lower(name) = $1
+           OR lower(base_url) = $1
+           OR lower(base_url) LIKE $2
+        ORDER BY created_at DESC
+        LIMIT 5
+      `,
+        [lower, like]
+      );
+
+    const hostMatch = rows.find((row) => {
+      try {
+        const host = new URL(row.base_url).hostname.toLowerCase();
+        return host === lower || host.includes(lower);
+      } catch {
+        return false;
+      }
+    });
+
+    const match = hostMatch ?? rows[0];
+    if (!match) {
+      throw new InternalServerErrorException(
+        `Cannot resolve source_id "${identifier}"`
+      );
+    }
+
+    return match.id;
+  }
+
   async upsertNovel(dto: NovelDTO) {
-    const novel = await this.novels.upsertFromCrawl(dto, this.maps);
-    return novel;
+    const sourceId = await this.normalizeSourceId(dto.source_id);
+    const payload: NovelDTO = { ...dto, source_id: sourceId };
+    const novel = await this.novels.upsertFromCrawl(payload, this.maps);
+    return { novel, source_id: sourceId };
   }
 
   async upsertChapter(dto: ChapterDTO & { novel_slug?: string }) {
+    const sourceId = await this.normalizeSourceId(dto.source_id);
     let novelId = dto.novel_id;
 
     if (!novelId && dto.novel_ext_series_id) {
       novelId = await this.maps.findNovelIdBySeriesMap(
-        dto.source_id,
+        sourceId,
         dto.novel_ext_series_id
       );
     }
@@ -67,12 +121,12 @@ export class CrawlerPersistService {
       content_html: dto.content_html,
       url: dto.url ?? null,
       published_at: dto.published_at ?? null,
-      ext: { source_id: dto.source_id, ext_chapter_id: dto.ext_chapter_id },
+      ext: { source_id: sourceId, ext_chapter_id: dto.ext_chapter_id },
     });
 
     // ghi map chương
     await this.maps.upsertChapterMap({
-      source_id: dto.source_id,
+      source_id: sourceId,
       ext_chapter_id: dto.ext_chapter_id,
       novel_id: novelId,
       chapter_id: ch.id,
@@ -80,6 +134,6 @@ export class CrawlerPersistService {
       url: dto.url ?? null,
     });
 
-    return ch;
+    return { chapter: ch as Chapter, source_id: sourceId };
   }
 }
